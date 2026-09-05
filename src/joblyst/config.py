@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     opik_project_name: str = Field(default="joblyst", alias="OPIK_PROJECT_NAME")
     opik_enabled: bool = Field(default=True, alias="OPIK_ENABLED")
     resume_dir: str = './data'
+    jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
     llm_model: str = "openai:gpt-4o-mini"
 
     @property

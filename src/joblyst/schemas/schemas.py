@@ -5,7 +5,7 @@ These are the structured-output targets for the LLM/tool calls and the shared
 data contracts the nodes read and write.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 from typing import Literal
 
 Seniority = Literal["junior", "mid", "senior", "lead", "unknown"]
@@ -24,5 +24,14 @@ class Profile(BaseModel):
     remote_ok: bool = False
     raw_summary: str = ""
     
-    
+class JobPosting(BaseModel):
+    job_id: str
+    title: str
+    company: str
+    location: str
+    remote: bool
+    description: str
+    url: HttpUrl
+    tags: list[str] = Field(default_factory=list)
+    source: str 
     
