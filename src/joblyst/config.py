@@ -25,11 +25,12 @@ class Settings(BaseSettings):
     resume_dir: str = './data'
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
     llm_model: str = "openai:gpt-4o-mini"
+    adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
+    adzuna_api_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
 
     @property
     def has_opik(self) -> bool:
         return self.opik_enabled and bool(self.opik_api_key.get_secret_value())
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

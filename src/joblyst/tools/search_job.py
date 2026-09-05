@@ -48,7 +48,7 @@ def _truncate(text: str) -> str:
     """Cap a description at ``DESCRIPTION_LIMIT`` characters."""
     return (text or "")[:DESCRIPTION_LIMIT]
 
-def _failed(source: str, exc: Exception) -> list[JobPosting]:
+def _failed(source: str, exc: Exception) -> list[JobPosting]: # type: ignore
     """Record why a source returned nothing, then return nothing.
 
     Every source used to answer an exhausted quota, a rejected key and a genuine
@@ -118,7 +118,7 @@ class JSearchSource:
         if remote:
             params["work_from_home"] = "true"
         try:
-            response = httpx.get(self.BASE, params=params, headers={"X-API-Key": self.api_key}, timeout=self.timeout)
+            response = httpx.get(self.BASE, params=params, headers={"X-API-Key": self.api_key}, timeout=self.timeout) # type: ignore
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
@@ -160,7 +160,89 @@ class AdzunaSource:
 
     def __init__(self, app_id: str = "", app_key: str = "", timeout: float = 10.0) -> None:
         settigs = get_settings()
-        self.app_id = app_id or settigs
+        self.app_id = app_id or settigs.adzuna_app_id.get_secret_value()
+        self.app_key = app_key or settigs.adzuna_api_key.get_secret_value()
+        self.timeout = timeout
+    
+    @property
+    def available(self) -> bool:
+        """Whether an API key is configured."""
+        return bool(self.app_key) 
+    
+    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+        if not self.available:
+            return []
+        code = country or _location_to_country(country)
+        params = {
+            "app_id": self.app_id,
+            "app_key": self.app_key,
+            "results_per_page": min(limit, 50),
+            "what": query,
+            "content-type": "application/json",
+        }
+        if location:
+            params["where"] = location
+        
+        try:
+            resp = httpx.get(f"{self.BASE}/{code}/search/1", params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed("adzuna", exc)
+        return [self._to_posting(r, code) for r in data.get("results", [])]
+    
+    @staticmethod
+    def _to_posting(r: dict, code: str) -> JobPosting:
+        """Convert one Adzuna result into a ``JobPosting``."""
+        loc = (r.get("location") or {}).get("display_name") or code.upper()
+        return JobPosting(
+            job_id=f"adzuna-{r.get('id', '')}",
+            title=r.get("title", "").strip() or "Untitled",
+            company=(r.get("company") or {}).get("display_name", "").strip() or "Unknown",
+            location=loc,
+            remote="remote" in (r.get("title", "") + loc).lower(),
+            description=_truncate(r.get("description", "")),
+            url=r.get("redirect_url", ""),
+            tags=[c.get("label", "") for c in [r.get("category", {})] if c.get("label")],
+            source="adzuna",
+        )
+        
+class RemotiveSource:
+    """Keyless API of worldwide remote jobs."""
+
+    name = "remotive"
+    BASE = "https://remotive.com/api/remote-jobs"
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self.timeout = timeout
+
+    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+        """Fetch remote postings matching the query."""
+        try:
+            resp = httpx.get(self.BASE, params={"search": query, "limit": limit}, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed("remotive", exc)
+        return [self._to_posting(r) for r in data.get("jobs", [])[:limit]]
+
+    @staticmethod
+    def _to_posting(r: dict) -> JobPosting:
+        """Convert one Remotive result into a ``JobPosting``."""
+        return JobPosting(
+            job_id=f"remotive-{r.get('id', '')}",
+            title=r.get("title", "").strip() or "Untitled",
+            company=r.get("company_name", "").strip() or "Unknown",
+            location=r.get("candidate_required_location") or "Remote",
+            remote=True,
+            description=_truncate(r.get("description", "")),
+            url=r.get("url", ""),
+            tags=r.get("tags", []) or [],
+            source="remotive",
+        )
+        
+
+
     
 
     
