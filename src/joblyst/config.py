@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     opik_workspace: str = Field(default="", alias="OPIK_WORKSPACE")
     opik_project_name: str = Field(default="joblyst", alias="OPIK_PROJECT_NAME")
     opik_enabled: bool = Field(default=True, alias="OPIK_ENABLED")
+    resume_dir: str = './data'
 
     @property
     def has_opik(self) -> bool:
