@@ -12,6 +12,7 @@ dependencies = [
     "opik>=2.2",
     "pydantic>=2.11",
     "pydantic-settings>=2.6",
+    "pypdf>=6.17.0",
 ]
 
 [dependency-groups]
