@@ -31,7 +31,7 @@ class JobPosting(BaseModel):
     location: str
     remote: bool
     description: str
-    url: HttpUrl
+    url: str
     tags: list[str] = Field(default_factory=list)
     source: str 
     
