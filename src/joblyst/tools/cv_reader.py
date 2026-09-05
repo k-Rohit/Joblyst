@@ -35,7 +35,6 @@ def extract_cv_content(path: str | Path):
         reader = PdfReader(str(path))
         pages = [page.extract_text() or "" for page in reader.pages]
     except Exception as e:
-        logger.error("Error reading PDF %s: %s", cv_path, e)
         raise CVReadError(f"Could not read PDF {cv_path.name}: {e}") from e
     
     text = "\n".join(pages).strip()
