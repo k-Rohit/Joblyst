@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     opik_workspace: str = Field(default="", alias="OPIK_WORKSPACE")
     opik_project_name: str = Field(default="joblyst", alias="OPIK_PROJECT_NAME")
     opik_enabled: bool = Field(default=True, alias="OPIK_ENABLED")
+    
     resume_dir: str = './data'
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
     llm_model: str = "openai:gpt-4o-mini"
@@ -29,6 +30,8 @@ class Settings(BaseSettings):
     adzuna_api_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
     jooble_api_key: SecretStr = Field(default=SecretStr(""), alias="JOOBLE_API_KEY")
     jooble_base_url: str = Field(default="https://jooble.org/api", alias="JOOBLE_BASE_URL")
+    
+    search_concurrent_sources: bool = Field(default=True, alias="SCOUT_CONCURRENT_SOURCES")
 
     @property
     def has_opik(self) -> bool:
