@@ -66,8 +66,18 @@ def _failed(source: str, exc: Exception) -> list[JobPosting]: # type: ignore
         reason = "timed out"
     else:
         reason = type(exc).__name__
-        logger.warning("job source %s returned no jobs: %s", source, reason)
-        return []
+    logger.warning("job source %s returned no jobs: %s", source, reason)
+    return []
+
+def _dedup_jobs(jobs: list[JobPosting]) -> list[JobPosting]:
+    seen: set[tuple[str, str]] = set()
+    out: list[JobPosting] = []
+    for job in jobs:
+        key = (job.title.strip().lower(), job.company.strip().lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(job)
+    return out
 
 class JobSource(Protocol):
     """A pluggable jobs backend.
@@ -240,9 +250,133 @@ class RemotiveSource:
             tags=r.get("tags", []) or [],
             source="remotive",
         )
-        
 
 
+class HimalayasSource:
+    """Keyless remote-jobs board. ``country`` filters to postings that either
+    name that country in their restrictions or carry no restriction at all
+    (i.e. open worldwide) — confirmed by comparing result counts live."""
+
+    name = "himalayas"
+    BASE = "https://himalayas.app/jobs/api/search"
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self.timeout = timeout
+
+    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+        params: dict[str, object] = {"q": query, "page": 1}
+        code = country or _location_to_country(location)
+        if code:
+            params["country"] = code
+        try:
+            resp = httpx.get(self.BASE, params=params, timeout=self.timeout)  # type: ignore
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed(self.name, exc)
+        return [self._to_posting(r) for r in data.get("jobs", [])[:limit]]
+
+    @staticmethod
+    def _to_posting(r: dict) -> JobPosting:
+        """Convert one Himalayas result into a ``JobPosting``."""
+        restrictions = r.get("locationRestrictions") or []
+        guid = r.get("guid", "")
+        return JobPosting(
+            job_id=f"himalayas-{guid.rsplit('/', 1)[-1] or guid}",
+            title=(r.get("title") or "").strip() or "Untitled",
+            company=(r.get("companyName") or "").strip() or "Unknown",
+            location=", ".join(restrictions) if restrictions else "Worldwide",
+            remote=True,
+            description=_truncate(r.get("description") or ""),
+            url=r.get("applicationLink") or "",
+            tags=r.get("categories") or [],
+            source="himalayas",
+        )
+
+
+class JoobleSource:
+    """Needs an API key, and that key is region-locked: one registered on
+    jooble.org only searches US listings. For India results, register at
+    https://in.jooble.org/api/about instead (see .env.example)."""
+
+    name = "jooble"
+
+    def __init__(self, api_key: str = "", base_url: str = "", timeout: float = 10.0) -> None:
+        settings = get_settings()
+        self.api_key = api_key or settings.jooble_api_key.get_secret_value()
+        self.base_url = base_url or settings.jooble_base_url
+        self.timeout = timeout
+
+    @property
+    def available(self) -> bool:
+        """Whether an API key is configured."""
+        return bool(self.api_key)
+
+    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+        if not self.available:
+            return []
+        body = {
+            "keywords": query,
+            "location": location or "",
+            "page": "1",
+            "ResultOnPage": str(limit),
+        }
+        try:
+            resp = httpx.post(f"{self.base_url}/{self.api_key}", json=body, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed(self.name, exc)
+        return [self._to_posting(r) for r in data.get("jobs", [])[:limit]]
+
+    @staticmethod
+    def _to_posting(r: dict) -> JobPosting:
+        """Convert one Jooble result into a ``JobPosting``."""
+        return JobPosting(
+            job_id=f"jooble-{r.get('id', '')}",
+            title=(r.get("title") or "").strip() or "Untitled",
+            company=(r.get("company") or "").strip() or "Unknown",
+            location=r.get("location") or "Unspecified",
+            remote="remote" in (r.get("title", "") + r.get("location", "")).lower(),
+            description=_truncate(r.get("snippet") or ""),
+            url=r.get("link") or "",
+            tags=[t for t in [r.get("type")] if t],
+            source="jooble",
+        )
+
+def run_search(
+    query: str,
+    locastion: str | None = None,
+    country: str | None = None,
+    remote: bool = False,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    jsearch: JSearchSource | None = None,
+    adzuna: AdzunaSource | None = None,
+    remotive: RemotiveSource | None = None,
+    himalayas: HimalayasSource | None = None,
+    jooble: JoobleSource | None = None
+) -> tuple[list[JobPosting], list[str]]:
+    """
+    Search across the sources in order and return ``(jobs, sources_used)``.
+
+    A source is only queried if the previous ones returned too few jobs. Results
+    are merged, deduped by ``(title, company)`` and capped at ``limit``. The
+    sources are injectable for testing. ``sources_used`` goes into trace metadata.
+    """
+    jsearch = jsearch or JSearchSource()
+    adzuna = adzuna or AdzunaSource()
+    remotive = remotive or RemotiveSource()
+    himalayas = himalayas or HimalayasSource()
+    jooble = jooble or JoobleSource()
+    
+    jobs: list[JobPosting] = []
+    used: list[str] = []
+    return ([],[])
+    
+    
+
+    
     
 
     

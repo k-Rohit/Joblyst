@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     llm_model: str = "openai:gpt-4o-mini"
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_api_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
+    jooble_api_key: SecretStr = Field(default=SecretStr(""), alias="JOOBLE_API_KEY")
+    jooble_base_url: str = Field(default="https://jooble.org/api", alias="JOOBLE_BASE_URL")
 
     @property
     def has_opik(self) -> bool:
