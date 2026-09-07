@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     jooble_base_url: str = Field(default="https://jooble.org/api", alias="JOOBLE_BASE_URL")
     
     search_concurrent_sources: bool = Field(default=True, alias="SCOUT_CONCURRENT_SOURCES")
+    joblyst_source_soft_deadline: float = Field(
+        default=1.0,
+        alias="JOBLYST_SOURCE_SOFT_DEADLINE",
+        description="Seconds to wait for the first concurrent source before falling through to faster ones.",
+    )
 
     @property
     def has_opik(self) -> bool:

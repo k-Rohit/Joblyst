@@ -423,13 +423,77 @@ def run_search(
     
     concurrent = get_settings().search_concurrent_sources and len(fetchers) > 1
     pool: ThreadPoolExecutor | None = None
+    soft_deadline = get_settings().joblyst_source_soft_deadline if concurrent else None
     
     if concurrent:
-        pass
-        
+        # Fire every live source at once; the cascade below decides what gets
+        # consumed. copy_context keeps Opik tracer/cost contextvars intact in
+        # worker threads (same pattern as rank_jobs) — without it the per-source
+        # spans above land outside the trace.
+        pool = ThreadPoolExecutor(max_workers=len(fetchers))
+        futures = {name: pool.submit(contextvars.copy_context().run,fn) for name, fn in fetchers.items()}
+        def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
+            fut = futures.get(name)
+            if fut is None:
+                return []
+            try:
+                return fut.result(timeout=timeout)
+            except TimeoutError:
+                return []
+            except Exception:  # noqa: BLE001 - a dead source is an empty source
+                return []
+    else:
+        def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
+            try:
+                return fetchers[name]() if name in fetchers else []
+            except Exception:
+                return []
     
-    return ([],[])
+    def add(source_name: str, found: list[JobPosting]) -> None:
+        """Record a source's results if it returned any."""
+        if found:
+            used.append(source_name)
+            jobs.extend(found)
     
+    try:
+        # Phase 1: give jsearch a soft deadline; adzuna/remotive are already
+        # running and will usually be done by the time we look at them.
+        add("jsearch", fetch("jsearch", timeout=soft_deadline))
+        if len(_dedup_jobs(jobs)) < 5:
+            add("adzuna", fetch("adzuna"))
+        if remote or len(_dedup_jobs(jobs)) < 5:
+            add("remotive", fetch("remotive"))
+
+        # Phase 2: if we're still short AND jsearch hasn't been consumed yet,
+        # wait for it — it may be the only source with results today.
+        if len(_dedup_jobs(jobs)) < 5 and "jsearch" not in used and concurrent:
+            add("jsearch", fetch("jsearch"))
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=False)
+
+    return _dedup_jobs(jobs)[:limit], used
+
+
+@tool
+def search_jobs(query: str, country: str | None = None, remote: bool = False, limit: int = DEFAULT_LIMIT) -> list[dict]:
+    """Search for open job postings matching a query.
+
+    Args:
+        query: A job TITLE at the right seniority, 2-4 words, e.g. "senior data
+        scientist". Boards match this against posting titles, so every extra
+        skill or synonym narrows the match: a title-only query returns real
+        roles where a keyword list returns nothing at all.
+        country: Two-letter country code (us, gb, de, in, au, br, ...). Omit to
+        infer it from the query text.
+        remote: Set true to prioritise remote-friendly roles.
+        limit: Maximum number of postings to return.
+
+        Returns:
+            A list of job postings as dicts (title, company, location, description, url).
+            """
+    jobs, _sources = run_search(query=query, country=country, remote=remote, limit=limit)
+    return [job.model_dump() for job in jobs]
     
 
     
