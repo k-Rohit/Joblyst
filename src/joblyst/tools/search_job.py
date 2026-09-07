@@ -344,6 +344,38 @@ class JoobleSource:
             source="jooble",
         )
 
+class CacheSource:
+    """Offline fallback: keyword search over the committed ``cached_jobs.json``."""
+
+    name = "cache"
+
+    def __init__(self, path: Path = CACHE_PATH) -> None:
+        self.path = path
+
+    def _load(self) -> list[dict]:
+        """Load the cached postings, or an empty list if the file is missing/invalid."""
+        if not self.path.exists():
+            return []
+        try:
+            return json.loads(self.path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+        """Rank cached postings by how many query terms they contain."""
+        terms = [t for t in re.split(r"\W+", query.lower()) if t]
+        scored: list[tuple[int, dict]] = []
+        for row in self._load():
+            haystack = f"{row.get('title', '')} {row.get('description', '')} {' '.join(row.get('tags', []))}".lower()
+            score = sum(1 for t in terms if t in haystack) + (1 if remote and row.get("remote") else 0)
+            if score > 0 or not terms:
+                scored.append((score, row))
+                scored.sort(key=lambda s: s[0], reverse=True)
+                return [
+            JobPosting(**{**row, "source": "cache", "description": _truncate(row.get("description", ""))})
+            for _, row in scored[:limit]
+        ]
+
 def run_search(
     query: str,
     location: str | None = None,
@@ -382,11 +414,16 @@ def run_search(
     
     if jsearch.available:
         fetchers["jsearch"] = _spanned("jsearch", lambda: jsearch.fetch(query, location, country, remote, limit))
-    fetchers["adzuna"] = _spanned("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
+    if adzuna.available:
+        fetchers["adzuna"] = _spanned("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
     fetchers["remotive"] = _spanned("remotive", lambda: remotive.fetch(query, location, country, remote, limit))
+    fetchers["himalayas"] = _spanned("himalayas", lambda: himalayas.fetch(query, location, country, remote, limit))
+    if jooble.available:
+        fetchers["jooble"] = _spanned("jooble", lambda: jooble.fetch(query, location, country, remote, limit))
     
     concurrent = get_settings().search_concurrent_sources and len(fetchers) > 1
     pool: ThreadPoolExecutor | None = None
+    
     if concurrent:
         pass
         
