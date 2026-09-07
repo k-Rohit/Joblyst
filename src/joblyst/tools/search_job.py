@@ -480,18 +480,18 @@ def search_jobs(query: str, country: str | None = None, remote: bool = False, li
     """Search for open job postings matching a query.
 
     Args:
-        query: A job TITLE at the right seniority, 2-4 words, e.g. "senior data
-        scientist". Boards match this against posting titles, so every extra
-        skill or synonym narrows the match: a title-only query returns real
-        roles where a keyword list returns nothing at all.
-        country: Two-letter country code (us, gb, de, in, au, br, ...). Omit to
-        infer it from the query text.
-        remote: Set true to prioritise remote-friendly roles.
+        query: A short job title (2-4 words), e.g. "senior data scientist" —
+            not a list of skills. Job boards match this text against posting
+            titles, so a precise title finds real openings while a
+            keyword-stuffed query usually returns nothing.
+        country: Two-letter country code (us, gb, de, in, au, br, ...). Omit
+            to infer it from the query text.
+        remote: Set true to prioritize remote-friendly roles.
         limit: Maximum number of postings to return.
 
-        Returns:
-            A list of job postings as dicts (title, company, location, description, url).
-            """
+    Returns:
+        A list of job postings as dicts (title, company, location, description, url).
+    """
     jobs, _sources = run_search(query=query, country=country, remote=remote, limit=limit)
     return [job.model_dump() for job in jobs]
     
