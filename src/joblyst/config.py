@@ -16,6 +16,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    joblyst_fetch_model: str = Field(default="openai:gpt-4.1-nano", alias="JOBLYST_FETCH_MODEL")
+    joblyst_model: str = Field(default="", alias="JOBLYST_MODEL")
+    
     openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
 
     opik_api_key: SecretStr = Field(default=SecretStr(""), alias="OPIK_API_KEY")
@@ -37,6 +40,7 @@ class Settings(BaseSettings):
         alias="JOBLYST_SOURCE_SOFT_DEADLINE",
         description="Seconds to wait for the first concurrent source before falling through to faster ones.",
     )
+    max_llm_calls_per_run: int = 3
 
     @property
     def has_opik(self) -> bool:
