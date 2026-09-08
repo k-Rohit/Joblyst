@@ -8,6 +8,7 @@ from functools import lru_cache
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from joblyst.exceptions import LLMBudgetExceededError
 from joblyst.config import get_settings
 
 
@@ -27,3 +28,9 @@ def get_chat_model(model: str = "openai:gpt-4o-mini", temperature: float = 0.0) 
     if model.startswith("openai:"):
         _export_openai_key()
     return init_chat_model(model, temperature=temperature)
+
+def ensure_budget(current_calls: int, planned: int, max_calls: int) -> None:
+    if current_calls + planned > max_calls:
+        raise LLMBudgetExceededError(
+            f"Run would make {current_calls + planned} LLM calls, exceeding MAX_LLM_CALLS_PER_RUN={max_calls}."
+        )
