@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field, HttpUrl
 from typing import Literal
 
 Seniority = Literal["junior", "mid", "senior", "lead", "unknown"]
-JobSourceName = Literal["jsearch", "adzuna", "remotive", "cache"]
+JobSourceName = Literal["jsearch", "adzuna", "remotive", "himalayas", "jooble", "cache"]
 
+# extracted once from the CV by using the `extract_profile` method
 class Profile(BaseModel):
     """ A profile schema for a user in the joblyst application."""
     
@@ -24,6 +25,7 @@ class Profile(BaseModel):
     remote_ok: bool = False
     raw_summary: str = ""
     
+# normalised job listing
 class JobPosting(BaseModel):
     job_id: str
     title: str
@@ -33,5 +35,97 @@ class JobPosting(BaseModel):
     description: str
     url: str
     tags: list[str] = Field(default_factory=list)
-    source: str 
+    source: JobSourceName 
+
+class JobScore(BaseModel):
+    """ The ranking LLM's score for one job, keyed back to a posting by id. """
     
+    job_id: str
+    fit_score: int = Field(ge=0, le=100)
+    fit_explanation: str
+    matched_skills: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+class JobScores(BaseModel):
+    "Structured op container for a batch of `JobScore` "
+    scores: list[JobScore]
+
+class RankedJob(BaseModel):
+    """A job scored against the candidate profile."""
+
+    job: JobPosting
+    fit_score: int = Field(ge=0, le=100)
+    fit_explanation: str
+    matched_skills: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    
+class TailoredBullet(BaseModel):
+    """ 
+    One CV bullet reworded for the target job.
+    
+    `corpus_ref` is required: every bullet must point at the original text
+    it was dervied from, so the fabrication validator can check the rewrite against
+    the candidate's real experience.
+    """
+    
+    text: str
+    corpus_ref: str
+
+class ProjectEntry(BaseModel):
+    project_domain: str
+    project_skills: list[str] = Field(default_factory=list)
+    project_bullets: list[TailoredBullet] = Field(default_factory=list)
+
+class ExperienceEntry(BaseModel):
+    """ One role in the tailored CV's experience section """
+    
+    role: str
+    company: str
+    dates: str = ""
+    bullets: list[TailoredBullet] = Field(default_factory=list)
+    
+class CVContent(BaseModel):
+    """ The tailored CV: selected and reworded contnent """
+    
+    headline: str
+    summary: str
+    experience: list[ExperienceEntry] = Field(default_factory=list)
+    project: list[ProjectEntry] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    education: list[str] = Field(default_factory=list)
+
+class TailoringPack(BaseModel):
+    """Application material generated for a selected job.
+
+    The cover letter should stay under 350 words and reference at least two
+    specific job requirements; the honesty note names real gaps the candidate
+    should not paper over. Both are prompt contracts, enforced by evaluation
+    rather than validation.
+    """
+
+    cv: CVContent
+    cover_letter: str
+    honesty_note: str = ""
+
+class FlaggedClaim(BaseModel):
+    """One statement the fabrication validator could not ground in the corpus."""
+
+    where: str  # "cv_bullet:<corpus_ref>" | "skill:<name>" | "cover_letter:sentence:<n>"
+    text: str
+    reason: str
+    best_match_ratio: float = 0.0
+
+class FabricationReport(BaseModel):
+    """Deterministic validator output: flagged claims, never a retry signal.
+
+    ``claims_checked`` counts every claim the validator examined (bullets,
+    skills, factual cover-letter sentences) so a fabrication *rate* is
+    well-defined: ``flags / claims_checked``.
+    """
+
+    flags: int = 0
+    claims_checked: int = 0
+    flagged: list[FlaggedClaim] = Field(default_factory=list)
+    # The knob values this report ran with — recorded so every trace states
+    # what produced the flags, making threshold tuning measurable in Opik.
+    thresholds: dict[str, float] = Field(default_factory=dict)
