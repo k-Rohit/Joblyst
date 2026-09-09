@@ -40,6 +40,16 @@ class Settings(BaseSettings):
         alias="JOBLYST_SOURCE_SOFT_DEADLINE",
         description="Seconds to wait for the first concurrent source before falling through to faster ones.",
     )
+    joblyst_max_jobs: int = Field(
+        default=10,
+        alias="JOBLYST_MAX_JOBS",
+        description="Jobs fetched per search call; drives ranking latency (more jobs = more rank_jobs batches).",
+    )
+    joblyst_rank_batch: int = Field(
+        default=4,
+        alias="JOBLYST_RANK_BATCH",
+        description="Jobs scored per ranking LLM call; batches run in parallel.",
+    )
     max_llm_calls_per_run: int = 3
 
     @property

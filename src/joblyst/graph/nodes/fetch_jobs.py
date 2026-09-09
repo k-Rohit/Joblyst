@@ -91,7 +91,7 @@ def fetch_jobs(state: AgentState) -> dict:
         query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
         country = None
         remote = profile.remote_ok
-    jobs, sources = run_search(query=query, location=location, country=country, remote=remote, limit=10)
+    jobs, sources = run_search(query=query, location=location, country=country, remote=remote, limit=settings.joblyst_max_jobs)
     jobs = _dedupe_with_existing(state.get("jobs", []), jobs)[:MERGED_CEILING]
     
     return {
