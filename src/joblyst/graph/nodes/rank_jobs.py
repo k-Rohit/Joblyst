@@ -120,14 +120,3 @@ def rank_jobs(state: AgentState) -> dict:
     
     ranked.sort(key=lambda r: r.fit_score, reverse=True)
     return {"ranked_jobs": ranked, "llm_calls": calls}
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
