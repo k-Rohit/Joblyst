@@ -50,7 +50,11 @@ class Settings(BaseSettings):
         alias="JOBLYST_RANK_BATCH",
         description="Jobs scored per ranking LLM call; batches run in parallel.",
     )
-    max_llm_calls_per_run: int = 3
+    max_llm_calls_per_run: int = Field(
+        default=25,
+        alias="MAX_LLM_CALLS_PER_RUN",
+        description="Circuit breaker: raises LLMBudgetExceededError if a run would exceed this many LLM calls.",
+    )
 
     @property
     def has_opik(self) -> bool:
