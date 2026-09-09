@@ -33,11 +33,12 @@ def _build_graph(checkpointer: MemorySaver | None = None):
     builder.add_node("rank_jobs", rank_jobs)
     builder.add_node("reformulate_query", reformulate_query)
     
+    builder.add_edge(START,"fetch_jobs")
     builder.add_edge("fetch_jobs","rank_jobs")
     builder.add_conditional_edges("rank_jobs", should_reformulate, ["reformulate_query", END])
     builder.add_edge("reformulate_query","fetch_jobs")
     
-    return builder.compile(checkpointer=checkpointer)
+    return builder.compile(checkpointer=checkpointer or MemorySaver())
 
 @lru_cache(maxsize=1)
 def get_compiled_graph():

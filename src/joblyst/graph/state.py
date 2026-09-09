@@ -15,7 +15,7 @@ class AgentState(TypedDict):
     reformulation_count: int
     llm_calls: int
     errors: list[str]
-    job_sources: list[str]
+    jobs_sources: list[str]
     tailoring: TailoringPack | None
     selected_job_id: str | None
     research_notes: str | None
