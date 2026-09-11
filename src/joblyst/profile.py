@@ -1,6 +1,6 @@
 from joblyst.llm import get_chat_model
 from joblyst.schemas.schemas import Profile
-from joblyst.prompts.prompt import EXTRACT_PROFILE_PROMPT
+from joblyst.prompts.extact_profile_prompt import EXTRACT_PROFILE_PROMPT
 
 from joblyst.tracing import get_tracer
 

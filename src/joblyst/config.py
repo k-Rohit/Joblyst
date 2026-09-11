@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     joblyst_model: str = Field(default="", alias="JOBLYST_MODEL")
     
     openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
+    llm_model: str = "openai:gpt-4o-mini"
 
     opik_api_key: SecretStr = Field(default=SecretStr(""), alias="OPIK_API_KEY")
     opik_workspace: str = Field(default="", alias="OPIK_WORKSPACE")
@@ -27,8 +28,8 @@ class Settings(BaseSettings):
     opik_enabled: bool = Field(default=True, alias="OPIK_ENABLED")
     
     resume_dir: str = './data'
+    
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
-    llm_model: str = "openai:gpt-4o-mini"
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_api_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
     jooble_api_key: SecretStr = Field(default=SecretStr(""), alias="JOOBLE_API_KEY")
@@ -55,6 +56,10 @@ class Settings(BaseSettings):
         alias="MAX_LLM_CALLS_PER_RUN",
         description="Circuit breaker: raises LLMBudgetExceededError if a run would exceed this many LLM calls.",
     )
+    
+    fab_bullet_ratio: float = Field(default=0.65)
+    fab_skill_ratio: float = Field(default=0.85)
+    fab_letter_ratio: float = Field(default=0.55)
 
     @property
     def has_opik(self) -> bool:

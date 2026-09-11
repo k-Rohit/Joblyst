@@ -69,8 +69,13 @@ class CandidateCorpus(BaseModel):
         return [item.text for item in self.items if item.kind == "skill"]
 
     def render_for_prompt(self) -> str:
-        """Render as ``[id] text`` lines the tailor LLM selects from."""
-        return "\n".join(f"[{item.id}] {item.text}" for item in self.items)
+        """Render as ``[id] (section) text`` lines the tailor LLM selects from.
+
+        The section is included so the model can tell a PROJECTS-sourced bullet
+        apart from an EXPERIENCE-sourced one — needed to route each into
+        CVContent.project vs CVContent.experience correctly.
+        """
+        return "\n".join(f"[{item.id}] ({item.section}) {item.text}" for item in self.items)
 
 
 def build_corpus(cv_text: str) -> CandidateCorpus:
