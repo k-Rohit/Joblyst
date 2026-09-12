@@ -8,6 +8,7 @@ from joblyst.graph.state import AgentState
 from joblyst.graph.nodes import fetch_jobs, rank_jobs, reformulate_query
 from joblyst.graph.nodes.tailor import tailor
 from joblyst.graph.nodes.validate_tailoring import validate_tailoring
+from joblyst.graph.nodes.score_external_job import score_external_job
 
 GOOD_FIT_THRESHOLD = 60
 MIN_GOOD_JOBS = 5
@@ -20,9 +21,14 @@ def route_entry(state: AgentState) -> str:
     ``selected_job_id`` must be passed explicitly on every invocation (None
     for a search) — it persists on the thread, so omitting it after a
     tailoring run would route a fresh search into ``tailor`` against a stale
-    job id left over from the previous call.
+    job id left over from the previous call. Checked first so an explicit
+    tailor request always wins over a stray ``external_job_text``.
     """
-    return "tailor" if state.get("selected_job_id") else "fetch_jobs"
+    if state.get("selected_job_id"):
+        return "tailor"
+    if state.get("external_job_text"):
+        return "score_external_job"
+    return "fetch_jobs"
 
 
 def should_reformulate(state: AgentState) -> str:
@@ -47,11 +53,13 @@ def _build_graph(checkpointer: MemorySaver | None = None):
     builder.add_node("reformulate_query", reformulate_query)
     builder.add_node("tailor", tailor)
     builder.add_node("validate_tailoring", validate_tailoring)
+    builder.add_node("score_external_job", score_external_job)
 
-    builder.add_conditional_edges(START, route_entry, ["fetch_jobs", "tailor"])
+    builder.add_conditional_edges(START, route_entry, ["fetch_jobs", "tailor", "score_external_job"])
     builder.add_edge("fetch_jobs","rank_jobs")
     builder.add_conditional_edges("rank_jobs", should_reformulate, ["reformulate_query", END])
     builder.add_edge("reformulate_query","fetch_jobs")
+    builder.add_edge("score_external_job", "tailor")
     builder.add_edge("tailor", "validate_tailoring")
     builder.add_edge("validate_tailoring", END)
 
