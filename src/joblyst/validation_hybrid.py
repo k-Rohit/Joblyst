@@ -138,7 +138,12 @@ def _check_bullet_hybrid(bullet, corpus: CandidateCorpus, bullet_ratio: float) -
     return None
 
 
-def validate_pack_hybrid(pack: TailoringPack, corpus: CandidateCorpus) -> FabricationReport:
+def validate_pack_hybrid(
+    pack: TailoringPack,
+    corpus: CandidateCorpus,
+    research_notes: str | None = None,
+    job_context: list[str] | None = None,
+) -> FabricationReport:
     """Deterministic first pass everywhere; LLM second pass only where it earns its cost.
 
     Skills stay deterministic-only (a vocabulary match needs no judgment call).
@@ -146,6 +151,10 @@ def validate_pack_hybrid(pack: TailoringPack, corpus: CandidateCorpus) -> Fabric
     through one scoped LLM comparison, since a high ratio can hide a single
     changed number or invented tool (see the four-case comparison this is
     built from — the ratio check missed all of them, the LLM caught all of them).
+
+    ``job_context`` (e.g. job title and company) and ``research_notes`` are
+    added to the cover-letter reference pool so "I am applying for X at Y" or
+    a researched company fact isn't wrongly flagged as ungrounded.
     """
     settings = get_settings()
     bullet_ratio, skill_ratio, letter_ratio = settings.fab_bullet_ratio, settings.fab_skill_ratio, settings.fab_letter_ratio
@@ -178,7 +187,9 @@ def validate_pack_hybrid(pack: TailoringPack, corpus: CandidateCorpus) -> Fabric
 
     # 3. Cover letter — hybrid, same shape as bullets: free check first, LLM
     #    only for sentences that already look close enough to be worth a closer read.
-    references = [item.text for item in corpus.items]
+    references = [item.text for item in corpus.items] + list(job_context or [])
+    if research_notes:
+        references.extend(_split_sentences(research_notes))
     sentences = _split_sentences(pack.cover_letter)
     for n, sentence in enumerate(sentences, start=1):
         if n == 1 or n == len(sentences) or not _looks_factual(sentence):
