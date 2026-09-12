@@ -6,12 +6,25 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from joblyst.graph.state import AgentState
 from joblyst.graph.nodes import fetch_jobs, rank_jobs, reformulate_query
+from joblyst.graph.nodes.tailor import tailor
+from joblyst.graph.nodes.validate_tailoring import validate_tailoring
 
 GOOD_FIT_THRESHOLD = 60
 MIN_GOOD_JOBS = 5
 MAX_REFFORMULATIONS = 2
 
-# routing functions - 
+# routing functions -
+def route_entry(state: AgentState) -> str:
+    """Entry router: tailor a selected job, or run the job search.
+
+    ``selected_job_id`` must be passed explicitly on every invocation (None
+    for a search) — it persists on the thread, so omitting it after a
+    tailoring run would route a fresh search into ``tailor`` against a stale
+    job id left over from the previous call.
+    """
+    return "tailor" if state.get("selected_job_id") else "fetch_jobs"
+
+
 def should_reformulate(state: AgentState) -> str:
     """ 
     Route after ranking: loop to broaden the search, or finish.
@@ -27,17 +40,21 @@ def should_reformulate(state: AgentState) -> str:
     return END
 
 def _build_graph(checkpointer: MemorySaver | None = None):
-    "Build and compile the job-finding graph"
+    "Build and compile the job-finding + tailoring graph"
     builder = StateGraph(AgentState)
     builder.add_node("fetch_jobs", fetch_jobs)
     builder.add_node("rank_jobs", rank_jobs)
     builder.add_node("reformulate_query", reformulate_query)
-    
-    builder.add_edge(START,"fetch_jobs")
+    builder.add_node("tailor", tailor)
+    builder.add_node("validate_tailoring", validate_tailoring)
+
+    builder.add_conditional_edges(START, route_entry, ["fetch_jobs", "tailor"])
     builder.add_edge("fetch_jobs","rank_jobs")
     builder.add_conditional_edges("rank_jobs", should_reformulate, ["reformulate_query", END])
     builder.add_edge("reformulate_query","fetch_jobs")
-    
+    builder.add_edge("tailor", "validate_tailoring")
+    builder.add_edge("validate_tailoring", END)
+
     return builder.compile(checkpointer=checkpointer or MemorySaver())
 
 @lru_cache(maxsize=1)
