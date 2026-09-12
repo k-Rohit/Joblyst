@@ -18,6 +18,7 @@ class AgentState(TypedDict):
     jobs_sources: list[str]
     tailoring: TailoringPack | None
     selected_job_id: str | None
+    external_job_text: str | None
     research_notes: str | None
     fabrication_flags: int
     fabrication_report: FabricationReport | None
