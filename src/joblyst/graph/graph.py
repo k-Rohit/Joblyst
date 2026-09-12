@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from joblyst.graph.state import AgentState
 from joblyst.graph.nodes import fetch_jobs, rank_jobs, reformulate_query
@@ -13,6 +14,29 @@ from joblyst.graph.nodes.score_external_job import score_external_job
 GOOD_FIT_THRESHOLD = 60
 MIN_GOOD_JOBS = 5
 MAX_REFFORMULATIONS = 2
+
+# Our Pydantic schemas, explicitly allow-listed for checkpoint (de)serialization —
+# MemorySaver's default serde warns on (and will eventually block) unregistered
+# custom types coming back out of a checkpoint.
+_CHECKPOINT_TYPES = [
+    ("joblyst.schemas.schemas", name)
+    for name in (
+        "Profile",
+        "JobPosting",
+        "RankedJob",
+        "TailoredBullet",
+        "ExperienceEntry",
+        "ProjectEntry",
+        "CVContent",
+        "TailoringPack",
+        "FlaggedClaim",
+        "FabricationReport",
+    )
+]
+
+
+def _checkpointer() -> MemorySaver:
+    return MemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=_CHECKPOINT_TYPES))
 
 # routing functions -
 def route_entry(state: AgentState) -> str:
@@ -63,7 +87,7 @@ def _build_graph(checkpointer: MemorySaver | None = None):
     builder.add_edge("tailor", "validate_tailoring")
     builder.add_edge("validate_tailoring", END)
 
-    return builder.compile(checkpointer=checkpointer or MemorySaver())
+    return builder.compile(checkpointer=checkpointer or _checkpointer())
 
 @lru_cache(maxsize=1)
 def get_compiled_graph():
