@@ -15,6 +15,8 @@ from __future__ import annotations
 from joblyst.config import get_settings
 from joblyst.corpus import build_corpus
 from joblyst.graph.nodes.rank_jobs import _render_profile
+from joblyst.tools.research import research_company
+from joblyst.prompts.tailor import TAILOR_PROMPT, RESEARCH_RULE
 from joblyst.schemas.schemas import RankedJob, TailoringPack
 from joblyst.graph.state import AgentState
 from joblyst.llm import get_chat_model, ensure_budget
@@ -33,4 +35,48 @@ def _render_job(ranked: RankedJob) -> str:
     )
     
 def tailor(state: AgentState) -> dict:
-    return {}
+    """ Generate a TailoringPack object for a particular selected job_id """
+    
+    settings = get_settings()
+    job_id = state.get("selected_job_id", None)
+    errors = list(state.get('errors',[]))
+    profile = state.get("profile")
+    ranked_jobs = state.get("ranked_jobs", [])
+    
+    if profile is None or not ranked_jobs:
+        errors.append("tailor: no search state on this thread — run a job search first")
+        return {"tailoring": None, "errors": errors}
+    ranked: RankedJob | None = None
+    for r in ranked_jobs:
+        if r.job.job_id == job_id:
+            ranked = r
+            break
+
+    if ranked is None:
+        errors.append(f"tailor: selected job id {job_id!r} is not among the {len(ranked_jobs)} ranked jobs on this thread")
+        return {"tailoring": None, "errors": errors}
+    
+    corpus = build_corpus(cv_text=state.get("cv_text",""))
+    if not corpus.items:
+        errors.append("tailor: empty candidate corpus (no cv_text on this thread) — cannot ground an application")
+        return {"tailoring": None, "errors": errors}
+    
+    research = research_company(ranked.job.company) if settings.has_tavily else None
+    
+    calls = state.get("llm_calls",0)
+    ensure_budget(calls, 1, settings.max_llm_calls_per_run)
+    
+    model = get_chat_model(settings.joblyst_model, temperature=0.3).with_structured_output(TailoringPack)
+    
+    prompt = TAILOR_PROMPT.format(
+        research_rule=RESEARCH_RULE if research else "",
+        profile=_render_profile(profile),
+        corpus=corpus.render_for_prompt(),
+        job=_render_job(ranked),
+        research=research or "none",
+    )
+    
+    pack: TailoringPack = model.invoke(prompt) #type: ignore
+    
+    return {"tailoring": pack, "research_notes": research, "llm_calls": calls + 1, "errors": errors}
+

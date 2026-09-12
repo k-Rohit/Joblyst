@@ -61,9 +61,15 @@ class Settings(BaseSettings):
     fab_skill_ratio: float = Field(default=0.85)
     fab_letter_ratio: float = Field(default=0.55)
 
+    tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
+
     @property
     def has_opik(self) -> bool:
         return self.opik_enabled and bool(self.opik_api_key.get_secret_value())
+
+    @property
+    def has_tavily(self) -> bool:
+        return bool(self.tavily_api_key.get_secret_value())
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

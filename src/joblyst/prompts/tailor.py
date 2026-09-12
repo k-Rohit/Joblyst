@@ -17,6 +17,9 @@ Rules:
 - The cover letter must be at most 350 words and reference at least 2 specific requirements from the job description.
 - Write an honesty_note naming the real gaps between the candidate and this job that they should not paper over.
 
+{research_rule}
+
+
 Candidate profile:
 {profile}
 
@@ -26,3 +29,5 @@ Candidate corpus:
 Target job:
 {job}
 """
+
+RESEARCH_RULE = "- Company facts in the cover letter may only come from the company research below."
