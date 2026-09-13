@@ -19,7 +19,7 @@ from joblyst.schemas.schemas import RankedJob
 from joblyst.tools.cv_reader import extract_cv_content
 from joblyst.tracing import opik_url
 
-st.set_page_config(page_title="Joblyst testbed", layout="wide")
+st.set_page_config(page_title="Joblyst 💼", layout="wide", page_icon="💼")
 
 # --- session state -----------------------------------------------------
 if "thread_id" not in st.session_state:
@@ -96,7 +96,7 @@ with st.sidebar:
             for proj in p.projects:
                 st.write(f"- {proj}")
 
-st.title("Joblyst testbed")
+st.title("Joblyst 💼")
 
 if not st.session_state.profile:
     st.info("Upload a resume in the sidebar and extract a profile to get started.")

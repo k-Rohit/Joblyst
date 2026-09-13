@@ -36,37 +36,15 @@ It's built as a genuine multi-node **LangGraph agent**, not a prompt wrapper: ty
 
 ## 🏗️ Architecture
 
-```
-                         ┌────────────────────┐
-   CV (PDF) ──────────▶  │  extract_profile    │  (pre-graph, LLM)
-                         └──────────┬──────────┘
-                                    │
-                         ┌──────────▼──────────┐
-              ┌────────▶ │      fetch_jobs      │◀────────┐
-              │          │ (LLM picks the query) │         │
-              │          └──────────┬──────────┘         │
-              │                     │                     │
-              │          ┌──────────▼──────────┐         │
-              │          │      rank_jobs        │        │ loop
-              │          │ (parallel LLM batches) │        │ (max 2)
-              │          └──────────┬──────────┘         │
-              │                     │                     │
-              │          ┌──────────▼──────────┐         │
-              └──────────│  enough good jobs?   │─ no ────┘
-                         └──────────┬──────────┘
-                                 yes│
-                                    ▼
-                                  END
+<div align="center">
+<img src="docs/images/graph.png" alt="Joblyst LangGraph graph" width="480">
+</div>
 
-   ── a SECOND invocation, same thread, once a job is selected ──
+<sub>Rendered directly from the compiled graph (`get_compiled_graph().get_graph().draw_mermaid_png()`) — this is the actual topology, not a hand-drawn approximation, so it can't drift from the real code.</sub>
 
-   selected_job_id ──▶ ┌───────┐    ┌─────────────────────┐
-                        │ tailor │──▶│ validate_tailoring   │──▶ END
-                        └───────┘    │ (deterministic + LLM) │
-                                     └─────────────────────┘
-```
+Profile extraction runs once, before the graph, producing a typed `Profile` that every entry point below reads from the same thread's checkpoint. Three ways in, decided by `route_entry` on the state: a fresh `external_job_text` → `score_external_job` (extracts + ranks a pasted posting, then flows straight into tailoring); a `selected_job_id` → straight to `tailor`; otherwise → a normal search. `fetch_jobs` and `rank_jobs` loop through `reformulate_query` up to twice if too few jobs clear the fit bar, then `tailor` and `validate_tailoring` close out any tailoring path with the same deterministic + hybrid fabrication check regardless of how the job was found.
 
-One `StateGraph`, one checkpointer, two entry points — a search and a tailoring run share the exact same thread, so tailoring reads the profile and ranked jobs straight from the checkpoint. Nothing re-runs.
+One `StateGraph`, one checkpointer, three entry points — a search and a tailoring run share the exact same thread, so tailoring reads the profile and ranked jobs straight from the checkpoint. Nothing re-runs.
 
 ## 🧰 Tech stack
 
@@ -101,8 +79,11 @@ Everything else — job-source keys, Opik, Jooble's region-locked domain, rankin
 | Ranking + reformulation loop | ✅ done |
 | Corpus-grounded tailoring | ✅ done |
 | Fabrication validator (deterministic + hybrid) | ✅ done |
-| Orchestration / batch runner | 🔧 in progress |
-| UI | 📋 not started |
+| External job scoring (paste a posting you found yourself) | ✅ done |
+| Target-role override (search a domain your CV history doesn't reflect) | ✅ done |
+| Orchestration (`runner.py`, one path shared by every entry point) | ✅ done |
+| Streamlit testbed UI | ✅ done |
+| Formal eval suite (datasets, LLM judges, human-calibrated) | 📋 not started |
 
 Built by following [jamwithai/observable-job-agent](https://github.com/jamwithai/observable-job-agent) to learn production LangGraph patterns firsthand — then diverging where the evidence pointed somewhere better: extra job sources, `ProjectEntry`-aware tailoring, and a hybrid validator added after measuring exactly where a deterministic-only check falls short.
 
