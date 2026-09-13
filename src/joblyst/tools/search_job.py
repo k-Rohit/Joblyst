@@ -361,7 +361,7 @@ class CacheSource:
         except (json.JSONDecodeError, OSError):
             return []
 
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]: #type: ignore
         """Rank cached postings by how many query terms they contain."""
         terms = [t for t in re.split(r"\W+", query.lower()) if t]
         scored: list[tuple[int, dict]] = []
@@ -459,10 +459,16 @@ def run_search(
         # Phase 1: give jsearch a soft deadline; adzuna/remotive are already
         # running and will usually be done by the time we look at them.
         add("jsearch", fetch("jsearch", timeout=soft_deadline))
-        if len(_dedup_jobs(jobs)) < 5:
+        if len(_dedup_jobs(jobs)) < 5:  # "5" only gates whether to query MORE sources, not the final job count
             add("adzuna", fetch("adzuna"))
         if remote or len(_dedup_jobs(jobs)) < 5:
             add("remotive", fetch("remotive"))
+        if len(_dedup_jobs(jobs)) < 5:
+            add("himalayas", fetch("himalayas"))
+        # Jooble has a 500-request LIFETIME quota (not monthly) — only spend
+        # it when the other sources genuinely came up short.
+        if len(_dedup_jobs(jobs)) < 5:
+            add("jooble", fetch("jooble"))
 
         # Phase 2: if we're still short AND jsearch hasn't been consumed yet,
         # wait for it — it may be the only source with results today.
@@ -472,7 +478,7 @@ def run_search(
         if pool is not None:
             pool.shutdown(wait=False)
 
-    return _dedup_jobs(jobs)[:limit], used
+    return _dedup_jobs(jobs)[:limit], used  # the REAL cap on this call's output — everything above just decided which sources to bother asking
 
 
 @tool
