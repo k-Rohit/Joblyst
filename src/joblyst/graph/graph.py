@@ -1,15 +1,16 @@
 from __future__ import annotations
+
 from functools import lru_cache
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.graph import END, START, StateGraph
 
-from joblyst.graph.state import AgentState
 from joblyst.graph.nodes import fetch_jobs, rank_jobs, reformulate_query
+from joblyst.graph.nodes.score_external_job import score_external_job
 from joblyst.graph.nodes.tailor import tailor
 from joblyst.graph.nodes.validate_tailoring import validate_tailoring
-from joblyst.graph.nodes.score_external_job import score_external_job
+from joblyst.graph.state import AgentState
 
 GOOD_FIT_THRESHOLD = 60
 MIN_GOOD_JOBS = 5

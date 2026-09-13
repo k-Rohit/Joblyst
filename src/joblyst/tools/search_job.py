@@ -1,5 +1,5 @@
 """ 
-This module will fetch the jobs from the job boards
+This module will fetch the jobs from the job boards concurrently
 """
 
 from __future__ import annotations
@@ -26,14 +26,7 @@ DEFAULT_COUNTRY = "in"
 CACHE_PATH = Path(__file__).resolve().parent.parent.parent.parent / "data" / "cached_jobs.json"
 
 _COUNTRY_CODES: dict[str, str] = {
-    "united states": "us", "usa": "us", "us": "us", "america": "us",
-    "united kingdom": "gb", "uk": "gb", "england": "gb", "london": "gb",
-    "germany": "de", "deutschland": "de", "berlin": "de", "munich": "de", "münchen": "de",
     "india": "in", "bengaluru": "in", "bangalore": "in", "mumbai": "in", "delhi": "in",
-    "australia": "au", "sydney": "au", "melbourne": "au",
-    "brazil": "br", "brasil": "br", "são paulo": "br", "sao paulo": "br",
-    "canada": "ca", "france": "fr", "spain": "es", "netherlands": "nl",
-    "singapore": "sg", "poland": "pl", "italy": "it",
 }  # fmt: skip
 
 logger = logging.getLogger(__name__)

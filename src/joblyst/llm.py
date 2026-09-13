@@ -8,8 +8,8 @@ from functools import lru_cache
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from joblyst.exceptions import LLMBudgetExceededError
 from joblyst.config import get_settings
+from joblyst.exceptions import LLMBudgetExceededError
 
 
 def _export_openai_key() -> None:

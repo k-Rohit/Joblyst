@@ -5,9 +5,10 @@ from the tailored resume.
 
 from __future__ import annotations
 
-from joblyst.validation_hybrid import validate_pack_hybrid
-from joblyst.graph.state import AgentState
 from joblyst.corpus import build_corpus
+from joblyst.graph.state import AgentState
+from joblyst.validation_hybrid import validate_pack_hybrid
+
 
 def validate_tailoring(state: AgentState) -> dict:
     pack = state.get("tailoring")

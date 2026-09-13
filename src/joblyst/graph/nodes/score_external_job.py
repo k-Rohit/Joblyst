@@ -4,11 +4,13 @@ Score external job (the job that user has identified by himself/herself) not som
 """
 
 from joblyst.config import get_settings
-from joblyst.graph.nodes.rank_jobs import _render_profile, _render_jobs as _render_job, RANK_JOBS_PROMPT
 from joblyst.extract_external_job import extract_external_job
+from joblyst.graph.nodes.rank_jobs import RANK_JOBS_PROMPT, _render_profile
+from joblyst.graph.nodes.rank_jobs import _render_jobs as _render_job
 from joblyst.graph.state import AgentState
 from joblyst.llm import ensure_budget, get_chat_model
 from joblyst.schemas.schemas import JobScores, RankedJob
+
 
 def score_external_job(state: AgentState) -> dict:
     settings = get_settings()

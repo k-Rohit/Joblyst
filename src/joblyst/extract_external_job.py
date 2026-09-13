@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from pydantic import BaseModel
 from langchain_core.messages import SystemMessage
+from pydantic import BaseModel
 
 from joblyst.config import get_settings
 from joblyst.llm import get_chat_model

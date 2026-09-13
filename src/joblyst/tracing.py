@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-import contextlib
-import subprocess
 from collections.abc import Callable
+from typing import Any
 
 from joblyst.config import get_settings
 

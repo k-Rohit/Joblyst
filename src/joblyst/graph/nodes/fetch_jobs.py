@@ -11,12 +11,12 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from joblyst.config import get_settings
-from joblyst.schemas.schemas import JobPosting
 from joblyst.graph.state import AgentState
-from joblyst.llm import get_chat_model, ensure_budget
+from joblyst.llm import ensure_budget, get_chat_model
+from joblyst.schemas.schemas import JobPosting
 from joblyst.tools.search_job import run_search, search_jobs
 
-MERGED_CEILING = 25
+MERGED_CEILING = 25  # caps the TOTAL accumulated across reformulation loops, not any single search
 
 _SYSTEM = (
     "You are a job search assistant. Call the search_jobs tool exactly once.\n"

@@ -1,10 +1,8 @@
-from joblyst.llm import get_chat_model
-from joblyst.schemas.schemas import Profile
-from joblyst.prompts.extact_profile_prompt import EXTRACT_PROFILE_PROMPT
-
-from joblyst.tracing import get_tracer
-
 from joblyst.config import get_settings
+from joblyst.llm import get_chat_model
+from joblyst.prompts.extact_profile_prompt import EXTRACT_PROFILE_PROMPT
+from joblyst.schemas.schemas import Profile
+from joblyst.tracing import get_tracer
 
 settings = get_settings()
 

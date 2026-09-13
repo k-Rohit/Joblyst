@@ -2,7 +2,14 @@
 
 from typing import TypedDict
 
-from joblyst.schemas.schemas import FabricationReport, JobPosting, Profile, RankedJob, TailoringPack
+from joblyst.schemas.schemas import (
+    FabricationReport,
+    JobPosting,
+    Profile,
+    RankedJob,
+    TailoringPack,
+)
+
 
 class AgentState(TypedDict):
     """ The LangGraph state schema passed onto every node. """

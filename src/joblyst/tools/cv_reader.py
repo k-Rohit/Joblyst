@@ -4,11 +4,10 @@ The profile extraction will be done by an structured op LLM.
 No OCR, no layout analysis (out of scope by design).
 """
 
-from email.mime import text
+import logging
+from pathlib import Path
 
 from pypdf import PdfReader
-from pathlib import Path
-import logging
 
 from joblyst.config import get_settings
 from joblyst.exceptions import CVReadError

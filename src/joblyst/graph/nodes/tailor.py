@@ -15,11 +15,11 @@ from __future__ import annotations
 from joblyst.config import get_settings
 from joblyst.corpus import build_corpus
 from joblyst.graph.nodes.rank_jobs import _render_profile
-from joblyst.tools.research import research_company
-from joblyst.prompts.tailor import TAILOR_PROMPT, RESEARCH_RULE
-from joblyst.schemas.schemas import RankedJob, TailoringPack
 from joblyst.graph.state import AgentState
-from joblyst.llm import get_chat_model, ensure_budget
+from joblyst.llm import ensure_budget, get_chat_model
+from joblyst.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
+from joblyst.schemas.schemas import RankedJob, TailoringPack
+from joblyst.tools.research import research_company
 
 _DESCRIPTION_LIMIT = 3000
 
