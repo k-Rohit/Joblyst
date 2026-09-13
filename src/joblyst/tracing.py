@@ -41,6 +41,14 @@ def get_tracer(thread_id: str, tags: list[str]):
     return OpikTracer(tags=tags, thread_id=thread_id, project_name=settings.opik_project_name)
 
 
+def opik_url() -> str:
+    """Best-effort dashboard link for the UI footer."""
+    settings = get_settings()
+    if settings.opik_workspace:
+        return f"https://www.comet.com/opik/{settings.opik_workspace}/projects"
+    return "https://www.comet.com/opik/"
+
+
 def traced_call[T](name: str, fn: Callable[[], T], metadata: dict[str, Any] | None = None) -> Callable[[], T]:
     """Give ``fn`` its own span, named, or hand it back untouched.
 

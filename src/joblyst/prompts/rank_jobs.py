@@ -15,6 +15,15 @@ For each job, return:
     - matched_skills: the candidate's skills that are relevant to this job.
     - gaps: requirements the candidate seems to lack.
 
+    Rules:
+    - Do NOT claim the candidate has a skill, tool, or language unless it appears
+      verbatim in their listed skills/projects. If a role needs something they
+      don't have, that is a gap, not a stretch — name it as a gap instead.
+    - A role in a fundamentally different domain (e.g. hardware/silicon
+      engineering vs. software/data engineering) should score low even if the
+      posting happens to mention shared buzzwords (Python, Docker, "AI/ML") —
+      shared TOOLS across domains do not mean the ROLE itself is a fit.
+
     Candidate profile:
     {profile}
 

@@ -35,6 +35,7 @@ def _render_profile(profile: Profile, target_role: str | None = None) -> str:
     if target_role:
         base += f"\nNote: candidate is deliberately targeting {target_role!r} despite their title history — weigh skills/projects over past job titles."
         return base
+    return ""
 
 def _render_jobs(jobs: list[JobPosting]) -> str:
     """Format a batch of jobs as plain text for the ranking prompt."""
@@ -87,7 +88,7 @@ def rank_jobs(state: AgentState) -> dict:
     
     def score_batch(batch: list[JobPosting]) -> JobScores:
         
-        prompt = RANK_JOBS_PROMPT.format(profile=_render_profile(profile), jobs=_render_jobs(batch))  # type:ignore
+        prompt = RANK_JOBS_PROMPT.format(profile=_render_profile(profile, state.get("target_role")), jobs=_render_jobs(batch))  # type:ignore
         return model.invoke(prompt) # type:ignore
     
     # Batches are independent, so they run concurrently — ranking latency is the
