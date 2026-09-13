@@ -19,6 +19,11 @@ Fill in every field:
       is the primary signal.
     - primary_roles: the job titles/roles this person is a fit for, ordered with their current or most recent role first.
     - skills: a list of their skills, lowercased.
+    - projects: 2-4 short one-sentence descriptions of real projects from any
+      Projects section (what was built, with what, and its outcome if stated).
+      This exists specifically for candidates targeting a different domain than
+      their job titles suggest — their pivot evidence often lives in projects,
+      not formal roles. Leave empty if there is no Projects section.
     - years_experience: total years of professional experience as a number, or null.
     - locations: locations where they could work.
     - languages: spoken languages.

@@ -19,6 +19,7 @@ class Profile(BaseModel):
     seniority: Seniority = "unknown"
     primary_roles: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
     years_experience: float | None = None
     locations: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
