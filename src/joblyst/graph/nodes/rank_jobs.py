@@ -21,17 +21,20 @@ from joblyst.schemas.schemas import JobPosting, JobScores, Profile, RankedJob
 
 MAX_PARALLEL_BATCHES = 4
 
-def _render_profile(profile: Profile) -> str:
-    """Format the profile as plain text for the ranking prompt."""
-    return (
+def _render_profile(profile: Profile, target_role: str | None = None) -> str:
+    base = (
         f"Name: {profile.name}\n"
         f"Seniority: {profile.seniority}\n"
         f"Roles: {', '.join(profile.primary_roles)}\n"
         f"Skills: {', '.join(profile.skills)}\n"
+        f"Projects: {'; '.join(profile.projects)}\n"
         f"Years experience: {profile.years_experience}\n"
         f"Locations: {', '.join(profile.locations)}\n"
         f"Remote ok: {profile.remote_ok}"
     )
+    if target_role:
+        base += f"\nNote: candidate is deliberately targeting {target_role!r} despite their title history — weigh skills/projects over past job titles."
+        return base
 
 def _render_jobs(jobs: list[JobPosting]) -> str:
     """Format a batch of jobs as plain text for the ranking prompt."""

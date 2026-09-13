@@ -50,6 +50,15 @@ def _build_prompt(state: AgentState) -> str:
         f"Locations: {', '.join(profile.locations) or 'unknown'}",
         f"Open to remote: {profile.remote_ok}",
 ]
+    if state.get("target_role"):
+        lines.append(
+            f"\nThe candidate's past job titles are {', '.join(profile.primary_roles) or 'unclear'}, "
+            f"but they are deliberately targeting: {state['target_role']!r}. "
+            f"Search for that target role. Their evidence for this pivot is their skills "
+            f"({', '.join(profile.skills[:15])}) and real projects "
+            f"({'; '.join(profile.projects) or 'none listed'}) — weigh those, not their job history."
+        )
+
     reformulated = state.get('search_query')
     if state.get("reformulation_count",0) and reformulated:
         lines.append(

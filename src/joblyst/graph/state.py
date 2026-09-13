@@ -10,7 +10,6 @@ from joblyst.schemas.schemas import (
     TailoringPack,
 )
 
-
 class AgentState(TypedDict):
     """ The LangGraph state schema passed onto every node. """
     
@@ -26,6 +25,8 @@ class AgentState(TypedDict):
     tailoring: TailoringPack | None
     selected_job_id: str | None
     external_job_text: str | None
+    ## added for the purpose of that sometimes a person may want to swtich domain/field.
+    target_role: str | None 
     research_notes: str | None
     fabrication_flags: int
     fabrication_report: FabricationReport | None

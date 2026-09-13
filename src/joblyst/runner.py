@@ -47,13 +47,13 @@ class SearchResult:
     errors: list[str] = field(default_factory=list)
 
 
-def run_search(profile: Profile, cv_text: str, *, thread_id: str, tags: list[str] | None = None) -> SearchResult:
+def run_search(profile: Profile, cv_text: str, *, thread_id: str, tags: list[str] | None = None, target_role: str | None = None) -> SearchResult:
     """Run the job-search half of the graph for an already-extracted profile.
 
     ``selected_job_id`` is passed explicitly as None so a reused thread never
     routes into stale tailoring (see ``route_entry`` in graph.py).
     """
-    inputs = {"profile": profile, "cv_text": cv_text, "selected_job_id": None}
+    inputs = {"profile": profile, "cv_text": cv_text, "selected_job_id": None, "target_role": target_role}
     final = _invoke(inputs, thread_id=thread_id, tags=tags or ["search"])
 
     return SearchResult(
