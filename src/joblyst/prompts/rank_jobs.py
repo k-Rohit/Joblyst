@@ -12,7 +12,9 @@ RANK_JOBS_PROMPT = """You are a job matching assistant. Given a candidate profil
 For each job, return:
     - fit_score: an integer from 0 to 100 for how well the job matches the candidate.
     - fit_explanation: 2-4 sentences explaining the score, covering why it matches and where the gaps are.
-    - matched_skills: the candidate's skills that are relevant to this job.
+    - matched_skills: ONLY skills that appear in the candidate's OWN profile
+      above AND are relevant to this job. Never list a skill the job wants
+      but the candidate's profile does not contain.
     - gaps: requirements the candidate seems to lack.
 
     Rules:
