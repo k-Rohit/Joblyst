@@ -96,6 +96,57 @@ def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
 
 
+def check_skills(skills: list[str], corpus: CandidateCorpus, skill_ratio: float) -> list[FlaggedClaim]:
+    """Ground each claimed skill against the corpus vocabulary. Never uses an LLM.
+
+    A skill is a vocabulary lookup, not a judgment call, so a second opinion
+    would add cost and drift for nothing. Shared by both validators so the
+    deterministic answer can't differ between them.
+
+    When segmentation parsed no skills section at all, fall back to grounding
+    each skill's words in the full corpus text — otherwise an unrecognized
+    heading ("TECHNICAL PROFICIENCIES") flags every genuinely-real skill at 0.00.
+    """
+    corpus_skills = corpus.skills()
+    full_corpus_text = _normalize(" ".join(item.text for item in corpus.items))
+    flagged: list[FlaggedClaim] = []
+
+    for skill in skills:
+        if corpus_skills:
+            best = _best_ratio(skill, corpus_skills)
+            # Containment: claiming LESS than the corpus states is honest —
+            # "AWS" is grounded by "basic AWS". The reverse (adding qualifiers
+            # the corpus never made) still has to pass the ratio.
+            claimed = set(_normalize(skill).split())
+            contained = bool(claimed) and any(claimed <= set(_normalize(cs).split()) for cs in corpus_skills)
+            if best < skill_ratio and not contained:
+                flagged.append(
+                    FlaggedClaim(
+                        where=f"skill:{skill}",
+                        text=skill,
+                        reason=f"skill is not in the candidate's corpus (best match {best:.2f})",
+                        best_match_ratio=round(best, 3),
+                    )
+                )
+        else:
+            tokens = [t for t in _normalize(skill).split() if len(t) >= _MIN_SKILL_TOKEN_CHARS]
+            missing = [t for t in tokens if t not in full_corpus_text]
+            if missing:
+                found = 1 - len(missing) / len(tokens) if tokens else 0.0
+                flagged.append(
+                    FlaggedClaim(
+                        where=f"skill:{skill}",
+                        text=skill,
+                        reason=(
+                            "no skills section was parsed from the CV, and these words appear "
+                            f"nowhere in its text: {', '.join(missing)}"
+                        ),
+                        best_match_ratio=round(found, 3),
+                    )
+                )
+    return flagged
+
+
 def validate_pack(
     pack: TailoringPack,
     corpus: CandidateCorpus,
@@ -147,46 +198,9 @@ def validate_pack(
         for bullet in entry.project_bullets:
             check_bullet(bullet)
 
-    # 2. Skills: must come from the corpus skill vocabulary. When segmentation
-    #    parsed no skills section at all, fall back to grounding each skill's
-    #    words in the full corpus text — still deterministic, and the reason
-    #    names the real gap instead of flagging everything at 0.00.
-    corpus_skills = corpus.skills()
-    full_corpus_text = _normalize(" ".join(item.text for item in corpus.items))
-    for skill in pack.cv.skills:
-        claims_checked += 1
-        if corpus_skills:
-            best = _best_ratio(skill, corpus_skills)
-            # Containment: claiming LESS than the corpus states is honest —
-            # "AWS" is grounded by "basic AWS". The reverse (adding qualifiers
-            # the corpus never made) still has to pass the ratio.
-            claimed = set(_normalize(skill).split())
-            contained = bool(claimed) and any(claimed <= set(_normalize(cs).split()) for cs in corpus_skills)
-            if best < skill_ratio and not contained:
-                flagged.append(
-                    FlaggedClaim(
-                        where=f"skill:{skill}",
-                        text=skill,
-                        reason=f"skill is not in the candidate's corpus (best match {best:.2f})",
-                        best_match_ratio=round(best, 3),
-                    )
-                )
-        else:
-            tokens = [t for t in _normalize(skill).split() if len(t) >= _MIN_SKILL_TOKEN_CHARS]
-            missing = [t for t in tokens if t not in full_corpus_text]
-            if missing:
-                found = 1 - len(missing) / len(tokens) if tokens else 0.0
-                flagged.append(
-                    FlaggedClaim(
-                        where=f"skill:{skill}",
-                        text=skill,
-                        reason=(
-                            "no skills section was parsed from the CV, and these words appear "
-                            f"nowhere in its text: {', '.join(missing)}"
-                        ),
-                        best_match_ratio=round(found, 3),
-                    )
-                )
+    # 2. Skills: must come from the corpus skill vocabulary.
+    claims_checked += len(pack.cv.skills)
+    flagged.extend(check_skills(pack.cv.skills, corpus, skill_ratio))
 
     # 3. Cover letter: factual sentences must trace to the corpus, the research
     #    notes, or the job context.
