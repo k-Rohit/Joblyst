@@ -57,9 +57,9 @@ class Settings(BaseSettings):
         description="Circuit breaker: raises LLMBudgetExceededError if a run would exceed this many LLM calls.",
     )
     
-    fab_bullet_ratio: float = Field(default=0.65)
-    fab_skill_ratio: float = Field(default=0.85)
-    fab_letter_ratio: float = Field(default=0.55)
+    fab_bullet_ratio: float = Field(default=0.65)  # min similarity a rewritten CV bullet must keep vs its cited corpus item
+    fab_skill_ratio: float = Field(default=0.85)  # min similarity a claimed skill must have vs the corpus's real skill vocabulary
+    fab_letter_ratio: float = Field(default=0.55)  # min similarity a cover-letter sentence must have vs corpus/research/job-context text
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
 

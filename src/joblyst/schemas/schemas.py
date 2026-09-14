@@ -115,6 +115,7 @@ class FlaggedClaim(BaseModel):
     where: str  # "cv_bullet:<corpus_ref>" | "skill:<name>" | "cover_letter:sentence:<n>"
     text: str
     reason: str
+    stage: str = "deterministic"
     best_match_ratio: float = 0.0
 
 class FabricationReport(BaseModel):
