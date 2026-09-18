@@ -243,6 +243,44 @@ reflects a prompt change rather than a job board's mood.
 
 ---
 
+## 2026-09-18 · Snapshot builder only captured one query's results
+
+**Symptom.** `scripts/create_snapshpt.py` was written to loop over 11 job-title
+queries per source, but the very first test run would have produced a cache
+dominated by a single query, or crashed outright depending on which source ran
+first.
+
+**Root cause.** Two copies of the same mistake:
+
+1. Adzuna's `jobs.extend(adzuna_jobs)` was indented one level too far out — after
+   the `for q in QUERIES` loop instead of inside it — so only the last query's
+   results (`"Gen AI Engineer"`) were ever kept; the other 10 were fetched and
+   discarded.
+2. Remotive and Himalayas were never put in their own loop at all. Both reused
+   the leftover `q` variable from the Adzuna loop above, so they only ever
+   searched that same last query — and if Adzuna had no key configured, `q` was
+   never assigned, so the script crashed with `NameError`.
+
+A third, smaller issue: the dedup step computed a clean list but the write step
+saved the raw, duplicate-containing one instead.
+
+**Fix.** Moved `.extend()` inside the loop for Adzuna, gave Remotive and
+Himalayas their own `for q in QUERIES` loops, and pointed the file write at the
+deduplicated list.
+
+**Result.** The committed snapshot (`data/cached_jobs.json`) has 99 postings
+spanning most of the query list — Data Scientist, Senior Data Engineer, ML
+Engineer, Data Analyst, Business Analyst, Analytics Engineer, AI Engineer — with
+zero duplicate (title, company) pairs. Confirmed `CacheSource` reads real,
+varied jobs back from the file rather than the file just existing.
+
+**Known gap:** all 99 postings are India-only (`country="in"`), and there are
+no "hardware engineer" postings — meaning the domain-mismatch hard case planned
+for the baseline batch has nothing realistic to fall back on if its live search
+ever fails.
+
+---
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
