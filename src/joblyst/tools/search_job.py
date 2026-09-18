@@ -363,8 +363,8 @@ class CacheSource:
             score = sum(1 for t in terms if t in haystack) + (1 if remote and row.get("remote") else 0)
             if score > 0 or not terms:
                 scored.append((score, row))
-                scored.sort(key=lambda s: s[0], reverse=True)
-                return [
+        scored.sort(key=lambda s: s[0], reverse=True)
+        return [
             JobPosting(**{**row, "source": "cache", "description": _truncate(row.get("description", ""))})
             for _, row in scored[:limit]
         ]
@@ -380,7 +380,8 @@ def run_search(
     adzuna: AdzunaSource | None = None,
     remotive: RemotiveSource | None = None,
     himalayas: HimalayasSource | None = None,
-    jooble: JoobleSource | None = None
+    jooble: JoobleSource | None = None,
+    cache: CacheSource | None = None,
 ) -> tuple[list[JobPosting], list[str]]:
     """
     Search across the sources in order and return ``(jobs, sources_used)``.
@@ -394,7 +395,8 @@ def run_search(
     remotive = remotive or RemotiveSource()
     himalayas = himalayas or HimalayasSource()
     jooble = jooble or JoobleSource()
-    
+    cache = cache or CacheSource()
+
     jobs: list[JobPosting] = []
     used: list[str] = []
     
@@ -439,7 +441,7 @@ def run_search(
         def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
             try:
                 return fetchers[name]() if name in fetchers else []
-            except Exception:
+            except Exception:  # noqa: BLE001 - a dead source is an empty source
                 return []
     
     def add(source_name: str, found: list[JobPosting]) -> None:
@@ -467,6 +469,12 @@ def run_search(
         # wait for it — it may be the only source with results today.
         if len(_dedup_jobs(jobs)) < 5 and "jsearch" not in used and concurrent:
             add("jsearch", fetch("jsearch"))
+
+        # Last resort: the committed snapshot. Reads a local file rather than
+        # the network, so it never joins the thread pool — and it only runs
+        # when every live source came up short, which is also the keyless path.
+        if len(_dedup_jobs(jobs)) < 5:
+            add("cache", _spanned("cache", lambda: cache.fetch(query, location, country, remote, limit))())
     finally:
         if pool is not None:
             pool.shutdown(wait=False)

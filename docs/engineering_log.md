@@ -204,6 +204,45 @@ same before and after.
 
 ---
 
+## 2026-09-18 · The offline job cache never ran, and could only return one job
+
+**Symptom.** Joblyst has a `CacheSource` — a local snapshot of job postings meant
+to serve as a fallback when the live job APIs return nothing. It never produced
+a single result.
+
+**Root cause.** Two independent faults.
+
+1. **It was never called.** `run_search` builds its list of sources from
+   JSearch, Adzuna, Remotive, Himalayas and Jooble. `cache` was never added to
+   that list, so the fully-written class sat unused — the same fault Himalayas
+   and Jooble had earlier in this project.
+2. **It returned after the first match.** Inside `fetch`, the sort and the
+   `return` were indented into the loop body, so the function exited as soon as
+   it found one matching posting instead of ranking all of them.
+
+**Fix.** Wired the cache in as the final step of the search cascade, running
+only when the live sources come up short. It reads a local file rather than the
+network, so it stays out of the thread pool. Also dedented the sort and return
+so the whole snapshot is ranked.
+
+**Result.** On a 5-posting snapshot searched for "data engineer":
+
+| | before | after |
+|---|---|---|
+| jobs returned by `CacheSource.fetch` | 1 | **4** |
+| jobs when every live source is down | 0 | **4** (`sources_used=['cache']`) |
+
+The irrelevant posting (a frontend role) was correctly excluded, so the ranking
+still works — it just no longer stops at the first hit.
+
+**Why it matters for evaluation.** The baseline batch runs each CV many times.
+Without a cache every run hits the live APIs, and Jooble's quota is 500 requests
+for the lifetime of the account. The cache makes repeated eval runs affordable,
+and makes them reproducible — the same job pool every time, so a score change
+reflects a prompt change rather than a job board's mood.
+
+---
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
