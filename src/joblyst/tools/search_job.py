@@ -1,4 +1,4 @@
-""" 
+"""
 This module will fetch the jobs from the job boards concurrently
 """
 
@@ -23,7 +23,9 @@ DESCRIPTION_LIMIT = 4000
 DEFAULT_LIMIT = 25
 DEFAULT_COUNTRY = "in"
 
-CACHE_PATH = Path(__file__).resolve().parent.parent.parent.parent / "data" / "cached_jobs.json"
+CACHE_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent / "data" / "cached_jobs.json"
+)
 
 _COUNTRY_CODES: dict[str, str] = {
     "india": "in", "bengaluru": "in", "bangalore": "in", "mumbai": "in", "delhi": "in",
@@ -31,17 +33,20 @@ _COUNTRY_CODES: dict[str, str] = {
 
 logger = logging.getLogger(__name__)
 
+
 def _location_to_country(location: str | None):
     if location is None:
         return DEFAULT_COUNTRY
     location = location.strip().lower()
-    return _COUNTRY_CODES.get(location,DEFAULT_COUNTRY)
+    return _COUNTRY_CODES.get(location, DEFAULT_COUNTRY)
+
 
 def _truncate(text: str) -> str:
     """Cap a description at ``DESCRIPTION_LIMIT`` characters."""
     return (text or "")[:DESCRIPTION_LIMIT]
 
-def _failed(source: str, exc: Exception) -> list[JobPosting]: # type: ignore
+
+def _failed(source: str, exc: Exception) -> list[JobPosting]:  # type: ignore
     """Record why a source returned nothing, then return nothing.
 
     Every source used to answer an exhausted quota, a rejected key and a genuine
@@ -53,7 +58,11 @@ def _failed(source: str, exc: Exception) -> list[JobPosting]: # type: ignore
     """
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
-        hint = {401: "key rejected", 403: "key lacks access", 429: "quota exhausted"}.get(code, "")
+        hint = {
+            401: "key rejected",
+            403: "key lacks access",
+            429: "quota exhausted",
+        }.get(code, "")
         reason = f"HTTP {code}{f' ({hint})' if hint else ''}"
     elif isinstance(exc, httpx.TimeoutException):
         reason = "timed out"
@@ -61,6 +70,7 @@ def _failed(source: str, exc: Exception) -> list[JobPosting]: # type: ignore
         reason = type(exc).__name__
     logger.warning("job source %s returned no jobs: %s", source, reason)
     return []
+
 
 def _dedup_jobs(jobs: list[JobPosting]) -> list[JobPosting]:
     seen: set[tuple[str, str]] = set()
@@ -72,6 +82,7 @@ def _dedup_jobs(jobs: list[JobPosting]) -> list[JobPosting]:
             out.append(job)
     return out
 
+
 class JobSource(Protocol):
     """A pluggable jobs backend.
 
@@ -81,12 +92,19 @@ class JobSource(Protocol):
 
     name: str
 
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:
         """Return postings matching the query, or an empty list on any failure."""
         ...
-    
+
+
 class JSearchSource:
-    
     """
     Official Google-for-Jobs aggregator (OpenWeb Ninja) with city-level search.
 
@@ -94,42 +112,60 @@ class JSearchSource:
     (``"<query> in <location>"``) and the country code is derived from it, so a
     Berlin CV returns Berlin jobs regardless of how the query was phrased.
     """
-    
+
     name = "jsearch"
     BASE = "https://api.openwebninja.com/jsearch/search-v2"
-    
+
     def __init__(self, api_key: str = "", timeout: float = 15.0) -> None:
         self.api_key = api_key or get_settings().jsearch_api_key.get_secret_value()
         self.timeout = timeout
-    
+
     @property
     def available(self) -> bool:
         """Whether an API key is configured."""
         return bool(self.api_key)
-    
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:
         """Fetch one page (10 results = 1 request credit; the free tier is small)."""
         if not self.available:
             return []
-        
+
         params: dict[str, object] = {
             "query": f"{query} in {location}" if location else query,
             "country": country or _location_to_country(location),
             "num_pages": 1,
         }
-        
+
         if remote:
             params["work_from_home"] = "true"
         try:
-            response = httpx.get(self.BASE, params=params, headers={"X-API-Key": self.api_key}, timeout=self.timeout) # type: ignore
+            response = httpx.get(
+                self.BASE,
+                params=params,  # type: ignore
+                headers={"X-API-Key": self.api_key},
+                timeout=self.timeout,
+            )  # type: ignore
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
             return _failed(self.name, e)
         payload = data.get("data")
-        rows = payload.get("jobs") if isinstance(payload, dict) else payload if isinstance(payload, list) else []
+        rows = (
+            payload.get("jobs")
+            if isinstance(payload, dict)
+            else payload
+            if isinstance(payload, list)
+            else []
+        )
         return [self._to_posting(r) for r in (rows or [])[:limit]]
-    
+
     @staticmethod
     def _clean_location(r: dict) -> str:
         """Extract the location from JSearch, dropping the ``• via <publisher>`` suffix."""
@@ -150,32 +186,45 @@ class JSearchSource:
             remote=bool(r.get("job_is_remote")),
             description=_truncate(r.get("job_description") or ""),
             url=r.get("job_apply_link") or "",
-            tags=[t for t in [r.get("job_employment_type"), r.get("job_publisher")] if t],
+            tags=[
+                t for t in [r.get("job_employment_type"), r.get("job_publisher")] if t
+            ],
             source="jsearch",
-    )
+        )
+
 
 class AdzunaSource:
-    """ 
+    """
     Free official jobs API covering ~20 countries; needs an app id and key.
     """
+
     name = "adzuna"
     BASE = "https://api.adzuna.com/v1/api/jobs"
 
-    def __init__(self, app_id: str = "", app_key: str = "", timeout: float = 10.0) -> None:
+    def __init__(
+        self, app_id: str = "", app_key: str = "", timeout: float = 10.0
+    ) -> None:
         settigs = get_settings()
         self.app_id = app_id or settigs.adzuna_app_id.get_secret_value()
         self.app_key = app_key or settigs.adzuna_api_key.get_secret_value()
         self.timeout = timeout
-    
+
     @property
     def available(self) -> bool:
         """Whether an API key is configured."""
-        return bool(self.app_key) 
-    
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+        return bool(self.app_key)
+
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:
         if not self.available:
             return []
-        code = country or _location_to_country(country)
+        code = country or _location_to_country(location)
         params = {
             "app_id": self.app_id,
             "app_key": self.app_key,
@@ -185,15 +234,17 @@ class AdzunaSource:
         }
         if location:
             params["where"] = location
-        
+
         try:
-            resp = httpx.get(f"{self.BASE}/{code}/search/1", params=params, timeout=self.timeout)
+            resp = httpx.get(
+                f"{self.BASE}/{code}/search/1", params=params, timeout=self.timeout
+            )
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
             return _failed("adzuna", exc)
         return [self._to_posting(r, code) for r in data.get("results", [])]
-    
+
     @staticmethod
     def _to_posting(r: dict, code: str) -> JobPosting:
         """Convert one Adzuna result into a ``JobPosting``."""
@@ -201,15 +252,19 @@ class AdzunaSource:
         return JobPosting(
             job_id=f"adzuna-{r.get('id', '')}",
             title=r.get("title", "").strip() or "Untitled",
-            company=(r.get("company") or {}).get("display_name", "").strip() or "Unknown",
+            company=(r.get("company") or {}).get("display_name", "").strip()
+            or "Unknown",
             location=loc,
             remote="remote" in (r.get("title", "") + loc).lower(),
             description=_truncate(r.get("description", "")),
             url=r.get("redirect_url", ""),
-            tags=[c.get("label", "") for c in [r.get("category", {})] if c.get("label")],
+            tags=[
+                c.get("label", "") for c in [r.get("category", {})] if c.get("label")
+            ],
             source="adzuna",
         )
-        
+
+
 class RemotiveSource:
     """Keyless API of worldwide remote jobs."""
 
@@ -219,10 +274,21 @@ class RemotiveSource:
     def __init__(self, timeout: float = 10.0) -> None:
         self.timeout = timeout
 
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:
         """Fetch remote postings matching the query."""
         try:
-            resp = httpx.get(self.BASE, params={"search": query, "limit": limit}, timeout=self.timeout)
+            resp = httpx.get(
+                self.BASE,
+                params={"search": query, "limit": limit},
+                timeout=self.timeout,
+            )
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
@@ -256,7 +322,14 @@ class HimalayasSource:
     def __init__(self, timeout: float = 10.0) -> None:
         self.timeout = timeout
 
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:
         params: dict[str, object] = {"q": query, "page": 1}
         code = country or _location_to_country(location)
         if code:
@@ -294,7 +367,9 @@ class JoobleSource:
 
     name = "jooble"
 
-    def __init__(self, api_key: str = "", base_url: str = "", timeout: float = 10.0) -> None:
+    def __init__(
+        self, api_key: str = "", base_url: str = "", timeout: float = 10.0
+    ) -> None:
         settings = get_settings()
         self.api_key = api_key or settings.jooble_api_key.get_secret_value()
         self.base_url = base_url or settings.jooble_base_url
@@ -305,7 +380,14 @@ class JoobleSource:
         """Whether an API key is configured."""
         return bool(self.api_key)
 
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:
         if not self.available:
             return []
         body = {
@@ -315,7 +397,9 @@ class JoobleSource:
             "ResultOnPage": str(limit),
         }
         try:
-            resp = httpx.post(f"{self.base_url}/{self.api_key}", json=body, timeout=self.timeout)
+            resp = httpx.post(
+                f"{self.base_url}/{self.api_key}", json=body, timeout=self.timeout
+            )
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
@@ -337,6 +421,7 @@ class JoobleSource:
             source="jooble",
         )
 
+
 class CacheSource:
     """Offline fallback: keyword search over the committed ``cached_jobs.json``."""
 
@@ -354,20 +439,36 @@ class CacheSource:
         except (json.JSONDecodeError, OSError):
             return []
 
-    def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]: #type: ignore
+    def fetch(
+        self,
+        query: str,
+        location: str | None,
+        country: str | None,
+        remote: bool,
+        limit: int,
+    ) -> list[JobPosting]:  # type: ignore
         """Rank cached postings by how many query terms they contain."""
         terms = [t for t in re.split(r"\W+", query.lower()) if t]
         scored: list[tuple[int, dict]] = []
         for row in self._load():
             haystack = f"{row.get('title', '')} {row.get('description', '')} {' '.join(row.get('tags', []))}".lower()
-            score = sum(1 for t in terms if t in haystack) + (1 if remote and row.get("remote") else 0)
+            score = sum(1 for t in terms if t in haystack) + (
+                1 if remote and row.get("remote") else 0
+            )
             if score > 0 or not terms:
                 scored.append((score, row))
         scored.sort(key=lambda s: s[0], reverse=True)
         return [
-            JobPosting(**{**row, "source": "cache", "description": _truncate(row.get("description", ""))})
+            JobPosting(
+                **{
+                    **row,
+                    "source": "cache",
+                    "description": _truncate(row.get("description", "")),
+                }
+            )
             for _, row in scored[:limit]
         ]
+
 
 def run_search(
     query: str,
@@ -399,34 +500,54 @@ def run_search(
 
     jobs: list[JobPosting] = []
     used: list[str] = []
-    
+
     from joblyst.tracing import traced_call
-    
-    def _spanned(name: str, fn: Callable[[], list[JobPosting]]) -> Callable[[], list[JobPosting]]:
-        return traced_call(f"source.{name}", fn, metadata={"source": name, "query": query, "location": location or ""})
-    
+
+    def _spanned(
+        name: str, fn: Callable[[], list[JobPosting]]
+    ) -> Callable[[], list[JobPosting]]:
+        return traced_call(
+            f"source.{name}",
+            fn,
+            metadata={"source": name, "query": query, "location": location or ""},
+        )
+
     fetchers: dict[str, Callable[[], list[JobPosting]]] = {}
-    
+
     if jsearch.available:
-        fetchers["jsearch"] = _spanned("jsearch", lambda: jsearch.fetch(query, location, country, remote, limit))
+        fetchers["jsearch"] = _spanned(
+            "jsearch", lambda: jsearch.fetch(query, location, country, remote, limit)
+        )
     if adzuna.available:
-        fetchers["adzuna"] = _spanned("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
-    fetchers["remotive"] = _spanned("remotive", lambda: remotive.fetch(query, location, country, remote, limit))
-    fetchers["himalayas"] = _spanned("himalayas", lambda: himalayas.fetch(query, location, country, remote, limit))
+        fetchers["adzuna"] = _spanned(
+            "adzuna", lambda: adzuna.fetch(query, location, country, remote, limit)
+        )
+    fetchers["remotive"] = _spanned(
+        "remotive", lambda: remotive.fetch(query, location, country, remote, limit)
+    )
+    fetchers["himalayas"] = _spanned(
+        "himalayas", lambda: himalayas.fetch(query, location, country, remote, limit)
+    )
     if jooble.available:
-        fetchers["jooble"] = _spanned("jooble", lambda: jooble.fetch(query, location, country, remote, limit))
-    
+        fetchers["jooble"] = _spanned(
+            "jooble", lambda: jooble.fetch(query, location, country, remote, limit)
+        )
+
     concurrent = get_settings().search_concurrent_sources and len(fetchers) > 1
     pool: ThreadPoolExecutor | None = None
     soft_deadline = get_settings().joblyst_source_soft_deadline if concurrent else None
-    
+
     if concurrent:
         # Fire every live source at once; the cascade below decides what gets
         # consumed. copy_context keeps Opik tracer/cost contextvars intact in
         # worker threads (same pattern as rank_jobs) — without it the per-source
         # spans above land outside the trace.
         pool = ThreadPoolExecutor(max_workers=len(fetchers))
-        futures = {name: pool.submit(contextvars.copy_context().run,fn) for name, fn in fetchers.items()}
+        futures = {
+            name: pool.submit(contextvars.copy_context().run, fn)
+            for name, fn in fetchers.items()
+        }
+
         def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
             fut = futures.get(name)
             if fut is None:
@@ -438,23 +559,26 @@ def run_search(
             except Exception:  # noqa: BLE001 - a dead source is an empty source
                 return []
     else:
+
         def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
             try:
                 return fetchers[name]() if name in fetchers else []
             except Exception:  # noqa: BLE001 - a dead source is an empty source
                 return []
-    
+
     def add(source_name: str, found: list[JobPosting]) -> None:
         """Record a source's results if it returned any."""
         if found:
             used.append(source_name)
             jobs.extend(found)
-    
+
     try:
         # Phase 1: give jsearch a soft deadline; adzuna/remotive are already
         # running and will usually be done by the time we look at them.
         add("jsearch", fetch("jsearch", timeout=soft_deadline))
-        if len(_dedup_jobs(jobs)) < 5:  # "5" only gates whether to query MORE sources, not the final job count
+        if (
+            len(_dedup_jobs(jobs)) < 5
+        ):  # "5" only gates whether to query MORE sources, not the final job count
             add("adzuna", fetch("adzuna"))
         if remote or len(_dedup_jobs(jobs)) < 5:
             add("remotive", fetch("remotive"))
@@ -474,16 +598,30 @@ def run_search(
         # the network, so it never joins the thread pool — and it only runs
         # when every live source came up short, which is also the keyless path.
         if len(_dedup_jobs(jobs)) < 5:
-            add("cache", _spanned("cache", lambda: cache.fetch(query, location, country, remote, limit))())
+            add(
+                "cache",
+                _spanned(
+                    "cache",
+                    lambda: cache.fetch(query, location, country, remote, limit),
+                )(),
+            )
     finally:
         if pool is not None:
             pool.shutdown(wait=False)
 
-    return _dedup_jobs(jobs)[:limit], used  # the REAL cap on this call's output — everything above just decided which sources to bother asking
+    return (
+        _dedup_jobs(jobs)[:limit],
+        used,
+    )  # the REAL cap on this call's output — everything above just decided which sources to bother asking
 
 
 @tool
-def search_jobs(query: str, country: str | None = None, remote: bool = False, limit: int = DEFAULT_LIMIT) -> list[dict]:
+def search_jobs(
+    query: str,
+    country: str | None = None,
+    remote: bool = False,
+    limit: int = DEFAULT_LIMIT,
+) -> list[dict]:
     """Search for open job postings matching a query.
 
     Args:
@@ -499,13 +637,7 @@ def search_jobs(query: str, country: str | None = None, remote: bool = False, li
     Returns:
         A list of job postings as dicts (title, company, location, description, url).
     """
-    jobs, _sources = run_search(query=query, country=country, remote=remote, limit=limit)
+    jobs, _sources = run_search(
+        query=query, country=country, remote=remote, limit=limit
+    )
     return [job.model_dump() for job in jobs]
-    
-
-    
-    
-
-    
-    
-
