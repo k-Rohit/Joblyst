@@ -39,6 +39,11 @@ _EXPERIENCE_HEADINGS = {"experience", "work experience", "employment", "professi
 # not an exact match ("Technical Skills", "Tech Stack", "Skills & Tools").
 _SKILL_HEADING_WORDS = {"skills", "skill", "technologies", "tools", "competencies", "stack"}
 
+# A lone all-caps token this short is an acronym skill ("SQL", "AWS", "ETL"),
+# not a section heading. Real single-word headings are longer ("EDUCATION",
+# "CERTIFICATIONS"), so the cut cleanly separates the two in practice.
+_MAX_ACRONYM_CHARS = 4
+
 _BULLET_GLYPHS = ("-", "•", "*", "-", "◦")
 _TERMINAL_PUNCT = (".", "!", "?", ":", ";")
 _PHONEISH = re.compile(r"\+?\d[\d\s().\-/]{6,}")
@@ -100,11 +105,16 @@ def _looks_like_heading(line: str) -> bool:
     shape_ok = 0 < len(words) <= 3 and not line.startswith(_BULLET_GLYPHS) and "," not in line and not line.rstrip().endswith(".")
     if not shape_ok:
         return False
-    if line.isupper():
-        return True
     lowered = line.lower().strip(" :")
     known = lowered in _SUMMARY_HEADINGS | _SKILL_HEADINGS | _EDUCATION_HEADINGS | _EXPERIENCE_HEADINGS
-    return known or any(word.strip("&/") in _SKILL_HEADING_WORDS for word in lowered.split())
+    if known or any(word.strip("&/") in _SKILL_HEADING_WORDS for word in lowered.split()):
+        return True
+    # CVs commonly list skills one per line. A bare "SQL" is all-caps and would
+    # otherwise read as a heading, silently ending the skills section and
+    # turning every skill after it into an experience bullet.
+    if len(words) == 1 and len(line) <= _MAX_ACRONYM_CHARS:
+        return False
+    return line.isupper()
 
 
 def _section_kind(heading: str) -> CorpusKind:
@@ -140,6 +150,9 @@ def _logical_lines(cv_text: str) -> list[str]:
             and not prev.endswith(_TERMINAL_PUNCT)
             and not line.startswith(_BULLET_GLYPHS)
             and not _looks_like_heading(line)
+            # Two lone words in a row are a one-per-line list ("Python" then
+            # "dbt"), not a wrapped sentence — joining them invents a skill.
+            and not (len(prev.split()) == 1 and len(line.split()) == 1)
             and (prev.endswith(",") or line[:1].islower())
         ):
             lines[-1] = f"{prev} {line}"
@@ -157,7 +170,9 @@ def _segment_cv(cv_text: str) -> list[CorpusItem]:
 
     def add(text: str, item_kind: CorpusKind, item_section: str) -> None:
         text = text.strip()
-        if len(text) < 3:
+        # "R", "Go" and "C#" are real skills; a bullet or summary line that
+        # short is a parsing artifact, so only skills get the shorter floor.
+        if len(text) < (1 if item_kind == "skill" else 3):
             return
         counters[item_kind] = counters.get(item_kind, 0) + 1
         items.append(
