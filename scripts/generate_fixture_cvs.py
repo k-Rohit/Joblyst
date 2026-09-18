@@ -60,7 +60,10 @@ def _render(name: str, contact: str, sections: list[tuple[str, list[str]]], file
         pdf.cell(width, 7, heading, new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9.5)
         for line in lines:
-            pdf.multi_cell(width, 4.6, line)
+            # multi_cell defaults to new_x=RIGHT/new_y=TOP, which leaves the cursor
+            # at the right edge on the SAME line — every following line then drifts
+            # right and overlaps. Force a normal newline at the left margin.
+            pdf.multi_cell(width, 4.6, line, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(1.5)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
