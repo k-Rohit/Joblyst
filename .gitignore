@@ -222,3 +222,6 @@ __marimo__/
 data/*.pdf
 data/real_cvs/
 reports/
+
+# Personal interview notes — not project documentation, never committed.
+interview_prep.md
