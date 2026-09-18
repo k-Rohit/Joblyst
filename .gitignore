@@ -225,3 +225,7 @@ reports/
 
 # Personal interview notes — not project documentation, never committed.
 interview_prep.md
+
+# Dev cache for run_batch.py — regenerate by deleting it (e.g. after changing
+# EXTRACT_PROFILE_PROMPT, since a stale cache would hide the prompt's effect).
+data/fixture_profiles_cache.json

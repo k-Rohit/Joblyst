@@ -290,3 +290,17 @@ ever fails.
 - **Unrecognised skills headings.** `TECHNICAL PROFICIENCIES` is not matched as
   a skills heading, so that CV parses 0 skills. The fallback added above keeps
   validation correct, but the skills are categorised as experience.
+- **Profile extraction ignores its own "leave empty" instruction.** The prompt
+  for `Profile.projects` says to leave it empty when the CV has no Projects
+  section, but on 3 of 5 fixture CVs (`lead_de_remote`, `mid_analyst_us`,
+  `senior_mle_uk` — none of which have a Projects section) the model filled it
+  anyway, lifting achievement bullets straight out of Experience. Negative
+  instructions ("leave empty if...") are weaker than positive ones for an LLM to
+  follow reliably. Low real-world impact today since `profile.projects` is only
+  read by the `target_role` domain-pivot branch in `fetch_jobs.py`, which none
+  of these three candidates use — but worth fixing with a positive, concrete
+  rule ("only pull from a section headed Projects/Personal Projects; never from
+  Experience") before trusting the field for its intended purpose. Needs a
+  before/after regression check across all 5 fixture CVs when it's fixed, not
+  a spot check on one — this is exactly what `ProfileFieldAccuracy` /
+  `expected_profiles.yaml` is for, once that eval exists.
