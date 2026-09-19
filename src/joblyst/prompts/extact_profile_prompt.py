@@ -10,7 +10,7 @@ Fill in every field:
       total years of professional experience, not job titles alone (a title
       like "Senior" at a small company after 1 year does not make someone
       senior):
-        * 0-2 years  -> junior   (a "fresher" with 1.5 years is junior, NOT mid)
+        * 0-2 years  -> junior
         * 2-5 years  -> mid
         * 5-8 years  -> senior
         * 8+ years, or with people-management/tech-lead scope -> lead
@@ -33,5 +33,3 @@ Fill in every field:
     CV text:
         {cv_text}
 """
-
-

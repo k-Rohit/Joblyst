@@ -84,23 +84,43 @@ def fetch_jobs(state: AgentState) -> dict:
     
     assert profile is not None, "fetch_jobs requires profile to already be set"
     location = profile.locations[0] if profile.locations else None
+
     if message.tool_calls:
-        args = message.tool_calls[0]["args"]
-        query = args.get("query") or " ".join(profile.primary_roles[:2])
-        query, dropped = _trim_query(query)
-        if dropped:
-            # Visible in the trace rather than silent: a query that needed
-            # trimming is the early warning that the sources are about to
-            # return nothing and the fallback board is about to fill in.
-            errors.append(f"fetch_jobs: query trimmed to {MAX_QUERY_WORDS} words, dropped {dropped!r}")
-        country = args.get("country")
-        remote = bool(args.get("remote", profile.remote_ok))
+        if len(message.tool_calls) > 1:
+            # The prompt asks for exactly one call, but that's a request, not
+            # a guarantee (same reasoning as MAX_QUERY_WORDS below) — run every
+            # call instead of silently dropping all but the first.
+            errors.append(
+                f"fetch_jobs: LLM issued {len(message.tool_calls)} tool calls "
+                "(expected 1); running all of them"
+            )
+        query = None
+        jobs: list[JobPosting] = []
+        sources: list[str] = []
+        for call in message.tool_calls:
+            args = call["args"]
+            call_query = args.get("query") or " ".join(profile.primary_roles[:2])
+            call_query, dropped = _trim_query(call_query)
+            if dropped:
+                # Visible in the trace rather than silent: a query that needed
+                # trimming is the early warning that the sources are about to
+                # return nothing and the fallback board is about to fill in.
+                errors.append(f"fetch_jobs: query trimmed to {MAX_QUERY_WORDS} words, dropped {dropped!r}")
+            country = args.get("country")
+            remote = bool(args.get("remote", profile.remote_ok))
+            query = query or call_query  # the state's search_query is the first call's, for reformulation messaging
+            call_jobs, call_sources = run_search(
+                query=call_query, location=location, country=country, remote=remote, limit=settings.joblyst_max_jobs
+            )
+            jobs = _dedupe_with_existing(jobs, call_jobs)
+            sources.extend(s for s in call_sources if s not in sources)
     else:
         errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
         query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
-        country = None
-        remote = profile.remote_ok
-    jobs, sources = run_search(query=query, location=location, country=country, remote=remote, limit=settings.joblyst_max_jobs)
+        jobs, sources = run_search(
+            query=query, location=location, country=None, remote=profile.remote_ok, limit=settings.joblyst_max_jobs
+        )
+
     jobs = _dedupe_with_existing(state.get("jobs", []), jobs)[:MERGED_CEILING]
     
     return {

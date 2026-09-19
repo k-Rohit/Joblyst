@@ -314,6 +314,35 @@ now country-matches every persona instead of just one.
 
 ---
 
+## 2026-09-19 · fetch_jobs silently discarded a second tool call
+
+**Symptom.** Inspecting a real trace of a search on my own resume, the LLM
+issued **two** `search_jobs` tool calls for a reformulated query — one for
+on-site roles, one for remote — but the ranked results only ever reflected
+one of them. The dropped call left no trace anywhere: not in the errors list,
+not in the UI, not in `reports/baseline.json`.
+
+**Root cause.** `fetch_jobs.py` read `message.tool_calls[0]` unconditionally.
+The system prompt asks the model to call the tool exactly once, but a prompt
+is a request, not a guarantee — the same reasoning already applied to
+`MAX_QUERY_WORDS` in this same file, just not to this line.
+
+**Fix.** Loop over every tool call the LLM issues instead of hardcoding index
+`0`. Each call runs its own search; the results are deduplicated and merged
+together (reusing the existing `_dedupe_with_existing` helper), and the
+sources lists are merged too. When more than one tool call happens, it's now
+logged as a visible `errors` entry instead of disappearing.
+
+**Result.** Verified all three paths with mocked LLM responses:
+
+| scenario | before | after |
+|---|---|---|
+| 1 tool call (normal) | 1 search run | 1 search run — unchanged |
+| 0 tool calls | 1 fallback search, logged | 1 fallback search, logged — unchanged |
+| 2 tool calls | **1 search run, 1 silently dropped** | **2 searches run, merged, logged** |
+
+---
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
