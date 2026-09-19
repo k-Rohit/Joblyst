@@ -281,19 +281,52 @@ ever fails.
 
 ---
 
+## 2026-09-19 · Fixture CVs were built for the wrong country
+
+**Symptom.** Only 1 of 5 fixture CVs was actually India-based. The other four
+had candidates in San Francisco, London, Berlin and Austin.
+
+**Root cause.** The fixture composition was carried over from the reference
+repo's international spread without checking it against Joblyst's own scope.
+Joblyst is India-only end to end — `DEFAULT_COUNTRY = "in"` in `search_job.py`,
+the Jooble base URL pinned to `in.jooble.org`, and `cached_jobs.json` built
+`country="in"` only — so a fixture candidate targeting London or Austin
+exercises a search path the real app never runs.
+
+**Fix.** Regenerated all 5 CVs with India-based locations and names, keeping
+every structural property that was the actual point of having 5 different
+CVs unchanged — same seniority spread, same heading styles, same skill
+formatting, same wrapped-bullet stress cases:
+
+| file | was | now |
+|---|---|---|
+| `junior_ds_us` → `junior_ds_in` | San Francisco | Bengaluru |
+| `senior_mle_uk` → `senior_mle_in` | London | Hyderabad |
+| `career_changer_in` | Bengaluru | unchanged |
+| `lead_de_remote` → `lead_in_remote` | Berlin | Pune, remote-ok |
+| `mid_analyst_us` → `mid_analyst_in` | Austin | Gurugram |
+
+**Result.** Verified the relocation changed nothing structural — corpus item
+counts and parsed-skill counts are identical before and after across all 5
+CVs, confirming the swap only touched location/name text, not the layout
+properties the fixtures exist to test. `cached_jobs.json` (already India-only)
+now country-matches every persona instead of just one.
+
+---
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
   is not recognised as a heading, so its contents merge into the section above.
-  All-caps `CERTIFICATIONS` works. Visible in `senior_mle_uk`, where education
+  All-caps `CERTIFICATIONS` works. Visible in `senior_mle_in`, where education
   ends up with 5 items instead of 2.
 - **Unrecognised skills headings.** `TECHNICAL PROFICIENCIES` is not matched as
   a skills heading, so that CV parses 0 skills. The fallback added above keeps
   validation correct, but the skills are categorised as experience.
 - **Profile extraction ignores its own "leave empty" instruction.** The prompt
   for `Profile.projects` says to leave it empty when the CV has no Projects
-  section, but on 3 of 5 fixture CVs (`lead_de_remote`, `mid_analyst_us`,
-  `senior_mle_uk` — none of which have a Projects section) the model filled it
+  section, but on 3 of 5 fixture CVs (`lead_in_remote`, `mid_analyst_in`,
+  `senior_mle_in` — none of which have a Projects section) the model filled it
   anyway, lifting achievement bullets straight out of Experience. Negative
   instructions ("leave empty if...") are weaker than positive ones for an LLM to
   follow reliably. Low real-world impact today since `profile.projects` is only

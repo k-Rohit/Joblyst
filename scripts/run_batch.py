@@ -11,7 +11,9 @@ _CV_DIR = Path(__file__).parent.parent / "data" / "fixture_cvs"
 # Dev cache only, not the golden dataset — regenerate anytime by deleting this
 # file (e.g. after changing EXTRACT_PROFILE_PROMPT, since a stale cache would
 # silently hide the effect of a prompt change).
-_PROFILE_CACHE_PATH = Path(__file__).parent.parent / "data" / "fixture_profiles_cache.json"
+_PROFILE_CACHE_PATH = (
+    Path(__file__).parent.parent / "data" / "fixture_profiles_cache.json"
+)
 
 
 def _load_or_extract_profiles(cv_dir: Path, cache_path: Path) -> dict[str, Profile]:
@@ -33,7 +35,9 @@ def _load_or_extract_profiles(cv_dir: Path, cache_path: Path) -> dict[str, Profi
             profiles[cv] = Profile.model_validate(cached_raw[cv])
             continue
         cv_content = extract_cv_content(cv_dir / cv)
-        profile = extract_profile(cv_content, thread_id=f"baseline-extract-{cv}", tags=["baseline-batch"])
+        profile = extract_profile(
+            cv_content, thread_id=f"baseline-extract-{cv}", tags=["baseline-batch"]
+        )
         profiles[cv] = profile
         cached_raw[cv] = profile.model_dump()
         dirty = True
