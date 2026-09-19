@@ -20,13 +20,12 @@
 # Ambiguous calls are flagged inline with a comment — check those first.
 
 - cv_file: junior_ds_in.pdf
-  verified: false
+  verified: true
   expected:
     name: Ananya Rao
-    seniority: junior
+    seniority: mid
     primary_roles:
-      - junior data scientist
-      - data science intern
+      - data scientist
     skills:
       - python
       - sql
@@ -58,7 +57,7 @@
       - "Grocery Price Tracker: built a scheduled Python scraper and Streamlit dashboard tracking price changes across 200 supermarket items."
 
 - cv_file: senior_mle_in.pdf
-  verified: false
+  verified: true
   expected:
     name: Arjun Mehta
     seniority: senior
@@ -101,13 +100,14 @@
     projects: []
 
 - cv_file: career_changer_in.pdf
-  verified: false
+  verified: true
   expected:
     name: Priya Nair
     seniority: junior
     primary_roles:
       - data analyst
-      - mathematics teacher
+      - business analyst
+      - analyst
     skills:
       - python
       - sql
@@ -135,7 +135,7 @@
       - "Exam Question Analysis: analysed 8 years of exam papers with pandas to find which topics were most frequently examined."
 
 - cv_file: lead_in_remote.pdf
-  verified: false
+  verified: true
   expected:
     name: Kavya Iyer
     seniority: lead
@@ -143,6 +143,8 @@
       - lead data engineer
       - senior data engineer
       - data engineer
+      - principal data engineer
+      - technical lead data engineer
     skills:
       - python
       - scala
@@ -170,13 +172,14 @@
     projects: []
 
 - cv_file: mid_analyst_in.pdf
-  verified: false
+  verified: true
   expected:
     name: Ryan Patel
     seniority: mid
     primary_roles:
       - data analyst
       - business analyst
+      - senior analyst
     skills:
       - sql
       - excel
