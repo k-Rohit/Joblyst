@@ -343,6 +343,119 @@ logged as a visible `errors` entry instead of disappearing.
 
 ---
 
+## 2026-09-19 · Ranking never saw the candidate's profile on a normal search
+
+**Symptom.** A dataset item pulled from a real run showed a Senior Data
+Scientist posting requiring "4+ years of commercial experience" scored `85`
+against a candidate with 1.5 years — a gap the ranking prompt has an explicit
+rule against ("do not claim a skill... name it as a gap instead"), yet the
+explanation read like a coin flip: "particularly with their experience in
+data science... the candidate's specific years of experience were not
+provided."
+
+**Root cause.** `_render_profile` in `rank_jobs.py`:
+
+```python
+def _render_profile(profile, target_role=None):
+    base = (f"Name: ...\nYears experience: {profile.years_experience}\n...")
+    if target_role:
+        base += "\nNote: candidate is deliberately targeting..."
+        return base
+    return ""
+```
+
+`return base` sat inside the `if target_role:` branch. Every normal search —
+the vast majority of runs, since `target_role` is only set for a deliberate
+domain pivot — hit `return ""` instead, sending the ranking LLM a prompt
+reading `"Candidate profile:\n\n"` with nothing after it. The model had no
+seniority, no skills, no years of experience, nothing — every fit score and
+explanation for a plain search was generated with **zero real information
+about the candidate**. This wasn't a copy from the reference repo's own
+`_render_profile` (confirmed by reading it directly — theirs has no `if`, no
+early return, no `target_role` concept at all): it was introduced when
+`target_role` was added to this project and the return statement got nested
+one level too far, the same shape of bug as the earlier indentation-cascade
+issues in `validation_batch_hybrid.py` and `create_snapshpt.py`.
+
+**Fix.** Moved `return base` outside the `if`; dropped `return ""` entirely.
+The `target_role` branch now only appends a note to the same profile text
+instead of gating whether the profile is sent at all.
+
+**Result.** Verified both paths directly:
+
+| call | before | after |
+|---|---|---|
+| `_render_profile(profile)` | `""` (empty) | full profile: name, seniority, skills, years experience, locations |
+| `_render_profile(profile, target_role="AI Engineer")` | full profile + note | unchanged — full profile + note |
+
+Every fit score and explanation ever produced by a normal (non-`target_role`)
+search before this fix was generated with no real candidate data — the
+domain-mismatch rule, the no-fabrication rule, all of `RANK_JOBS_PROMPT`'s
+guardrails had nothing to check against. This is the largest-impact bug found
+in the project so far; any prior baseline numbers or eval dataset items built
+before this fix should be treated as invalid and rebuilt.
+
+**Follow-up hardening.** The root problem behind this bug wasn't "input was
+missing" — the profile was always present, a control-flow bug just threw it
+away before it reached the LLM. The general lesson: an LLM never refuses when
+context is missing, it answers anyway and invents whatever's needed to sound
+plausible, so a hollow prompt is worse than a crash, not better. Required
+prompt inputs should fail loud, not degrade quietly; only genuinely optional
+context (`target_role`, `research_notes`) should be allowed to be absent.
+Added two guards to `rank_jobs()` so this exact failure mode can't ship
+silently again:
+
+```python
+assert profile is not None, "rank_jobs requires profile to already be set"
+...
+rendered_profile = _render_profile(profile, state.get("target_role"))
+assert rendered_profile, "rank_jobs: profile rendered empty — refusing to rank blind"
+```
+
+Verified the second assertion actually fires: patched `_render_profile` to
+return `""` (reproducing the exact old bug) and confirmed `rank_jobs` now
+raises immediately instead of sending the empty prompt to the LLM. Also moved
+the profile render outside the per-batch closure — previously re-rendered
+once per batch for no reason, now rendered once and reused.
+
+---
+
+## 2026-09-19 · Ranking had no explicit rule for experience-level gaps
+
+**Symptom.** A Senior Data Scientist posting requiring "4+ years" scored 85
+for a candidate with 1.5 years. Most of that was the empty-profile bug above,
+but even with the profile visible, `RANK_JOBS_PROMPT` never said what to do
+about an experience gap, so how hard the model penalized it was left to chance.
+
+**Fix.** Added one rule to `RANK_JOBS_PROMPT`: when a posting states a minimum
+years of experience well above the candidate's, that is a hard gap and scores
+below 60 (the good-fit threshold), however well the skills match.
+
+**Result.** Live test, same 3 postings, 3 identical runs, candidate at 1.5 years:
+
+| posting | needs | score |
+|---|---|---|
+| Senior Data Engineer | 6+ years | **20** |
+| Data Engineer | 1-3 years | **85** |
+| Data Engineer | 3+ years | **60** |
+
+The big gap is pushed far below the threshold, the matching role is untouched,
+and results were identical across runs. The small gap (1.5 vs 3+ years) lands
+exactly on the threshold, so "well above" is still a judgment call for
+borderline gaps.
+
+---
+
+## 2026-09-19 · Prompt changes were not versioned, so improvements could not be traced
+
+**Symptom.** The ranking prompt had been edited twice (a no-fabrication rule, then an experience-gap rule) and scores got better each time. But nothing recorded which prompt text produced which traces or eval scores. The only history was in git, and Opik had no link to it.
+
+**Root cause.** Prompts were plain Python strings. Opik's Prompt Library was never used, so it had no idea the text existed or that it changed.
+
+**Fix.** Added `register_prompts()` in `tracing.py`. It sends all five prompts to Opik's library under stable names. Unchanged text is a no-op; changed text becomes a new version. It runs at Streamlit startup and at the start of `run_batch.py --yes`. A failure is logged, never raised, so prompt sync cannot block a run.
+
+**Result.** All five prompts now exist in Opik with version 1 (verified with `get_prompt_history`). From here, every prompt edit creates a new version automatically. The fabrication judge prompt (`drift_check`, moved from `validation_hybrid.py` into `prompts/`) is registered too, since its wording decides what counts as a flag. Earlier rank_jobs versions were not backfilled, so its history starts at the current text. Next step: attach the prompt version to eval experiments so a score change can be tied to a prompt change.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

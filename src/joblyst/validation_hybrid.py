@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from joblyst.config import get_settings
 from joblyst.corpus import CandidateCorpus
 from joblyst.llm import get_chat_model
+from joblyst.prompts.drift_check import DRIFT_CHECK_PROMPT
 from joblyst.schemas.schemas import FabricationReport, FlaggedClaim, TailoringPack
 from joblyst.validation import (
     _best_pair_ratio,
@@ -50,27 +51,6 @@ LLM_JUDGE_MODEL = "openai:gpt-4o-mini"
 # How many of the closest real sources to hand the judge for a claim grounded
 # by search (summary, cover letter) rather than by an explicit corpus_ref.
 _TOP_SOURCES = 3
-
-_DRIFT_PROMPT = """
-
-A rewritten claim and its real source(s) are given below. The rewrite already \
-scored as similar overall — your only job is to check for one specific kind of problem a \
-similarity score can miss: a number, tool, or detail that was changed or added, hidden inside \
-otherwise-faithful wording.
-
-Rewrite:
-{rewrite}
-
-Real source(s):
-{sources}
-
-If every number, tool, and detail in the rewrite is actually present in the source(s), it's grounded. \
-If anything was changed (e.g. a bigger number) or added (e.g. a tool never mentioned), it's not.
-
-Judge ONLY in that direction. A rewrite is free to leave things out, shorten, generalize, or \
-mention only part of the source — omission is never a problem. Never flag a rewrite for what it \
-does not say, only for a detail it states that the source does not support.
-"""
 
 
 class _DriftCheck(BaseModel):
@@ -101,7 +81,7 @@ def _run_drift_checks(survivors: list[_Survivor]) -> list[FlaggedClaim]:
 
     model = get_chat_model(LLM_JUDGE_MODEL, temperature=0.0).with_structured_output(_DriftCheck)
     prompts = [
-        _DRIFT_PROMPT.format(rewrite=s.text, sources="\n".join(f"- {src}" for src in s.sources))
+        DRIFT_CHECK_PROMPT.format(rewrite=s.text, sources="\n".join(f"- {src}" for src in s.sources))
         for s in survivors
     ]
     results: list[_DriftCheck] = model.batch(prompts)  # type: ignore[assignment]

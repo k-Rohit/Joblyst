@@ -29,6 +29,7 @@ from joblyst.profile import extract_profile
 from joblyst.runner import run_search
 from joblyst.schemas.schemas import Profile
 from joblyst.tools.cv_reader import extract_cv_content
+from joblyst.tracing import register_prompts
 
 _CV_DIR = Path(__file__).parent.parent / "data" / "fixture_cvs"
 REPORT_PATH = Path(__file__).parent.parent / "reports" / "baseline.json"
@@ -174,6 +175,7 @@ def main() -> None:
         print("\nRe-run with --yes to execute.")
         sys.exit(0)
 
+    register_prompts()  # so this batch's traces sit against the current prompt versions
     cv_texts, profiles = _load_cvs_and_profiles(_CV_DIR, _PROFILE_CACHE_PATH)
     report = run(cases, cv_texts, profiles)
 

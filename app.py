@@ -17,9 +17,13 @@ from joblyst.profile import extract_profile
 from joblyst.runner import run_external_job, run_search, run_tailor
 from joblyst.schemas.schemas import RankedJob
 from joblyst.tools.cv_reader import extract_cv_content
-from joblyst.tracing import opik_url
+from joblyst.tracing import opik_url, register_prompts
 
 st.set_page_config(page_title="Joblyst 💼", layout="wide", page_icon="💼")
+
+if "prompts_registered" not in st.session_state:
+    register_prompts()  # version any prompt edits in Opik's prompt library
+    st.session_state.prompts_registered = True
 
 # --- session state -----------------------------------------------------
 if "thread_id" not in st.session_state:
