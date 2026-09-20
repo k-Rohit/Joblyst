@@ -4,8 +4,8 @@
     uv run python scripts/build_eval_dataset.py --kind ranking --push     # push to Opik
     uv run python scripts/build_eval_dataset.py --kind tailoring --push
 
-ranking-cases:   one item per ranked job, sampled best/middle/worst per trace
-                 from baseline-batch traces (built by scripts/run_batch.py).
+ranking-cases:   one item per ranked job: best, worst, and up to 5 jobs scoring >= 60
+                 per trace (where wrong scores hurt), from baseline-batch traces (built by scripts/run_batch.py).
 tailoring-cases: one item per tailoring run, from tailor-batch traces (not
                  built yet — scripts/run_tailor_batch.py doesn't exist).
 
@@ -27,8 +27,10 @@ RANKING_DATASET = "joblyst-ranking-cases"
 TAILORING_DATASET = "joblyst-tailoring-cases"
 RANKING_TAG = "baseline-batch"
 TAILORING_TAG = "tailor-batch"
-MAX_RANKING_ITEMS = 30
-MAX_TAILORING_ITEMS = 20
+MAX_RANKING_ITEMS = 40  # cap on NEW items per build
+GOOD_FIT_THRESHOLD = 60  # same bar the search loop uses for a good match
+GOOD_FIT_PER_TRACE = 5
+MAX_TAILORING_ITEMS = 30
 
 
 def _client():
@@ -67,13 +69,31 @@ def _as_dict(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def build_ranking_items(client, max_items: int) -> list[dict]:
+def _existing_ranking_pairs(client) -> set[tuple[str, int]]:
+    """(trace_id, rank_index) of every item already in the ranking dataset.
+
+    Labeled items gained extra fields, so Opik no longer sees a rebuilt copy as
+    a duplicate — this is what stops a re-pushed job from being labeled twice.
+    """
+    try:
+        items = client.get_dataset(name=RANKING_DATASET).get_items()
+    except Exception:  # noqa: BLE001 - dataset not created yet
+        return set()
+    return {(i["provenance"]["trace_id"], i["rank_index"]) for i in items}
+
+
+def build_ranking_items(
+    client, max_items: int, skip: set[tuple[str, int]] | None = None
+) -> list[dict]:
     """One item per ranked job, sampled from the traces' final state.
 
     The trace OUTPUT carries the final graph state (profile + the full sorted
-    ``ranked_jobs``); per-trace we sample the best, middle, and worst-ranked
-    job so the dataset spans the score range instead of exhausting one run.
+    ``ranked_jobs``). Per trace we take the best and worst job, plus up to
+    GOOD_FIT_PER_TRACE jobs scoring >= GOOD_FIT_THRESHOLD: a low score is
+    almost always right, so the model's mistakes are in the high scores.
+    Pairs in ``skip`` (already in the dataset) are not built again.
     """
+    skip = skip or set()
     project = _get_opik_project_name()
     traces = client.search_traces(
         project_name=project,
@@ -91,8 +111,15 @@ def build_ranking_items(client, max_items: int) -> list[dict]:
             continue
 
         ranked.sort(key=lambda r: r.get("fit_score", 0), reverse=True)
-        picks = sorted({0, len(ranked) // 2, len(ranked) - 1})
+        good = [
+            i
+            for i, r in enumerate(ranked)
+            if r.get("fit_score", 0) >= GOOD_FIT_THRESHOLD
+        ]
+        picks = sorted({0, len(ranked) - 1, *good[:GOOD_FIT_PER_TRACE]})
         for index in picks:
+            if (str(trace.id), index) in skip:
+                continue
             entry = ranked[index]
             job = _as_dict(entry.get("job"))
             if not job:
@@ -172,7 +199,7 @@ def main() -> None:
         "--max",
         type=int,
         default=None,
-        help="max items (defaults: 30 ranking / 20 tailoring)",
+        help="max new items (defaults: 40 ranking / 20 tailoring)",
     )
     parser.add_argument(
         "--push",
@@ -183,7 +210,9 @@ def main() -> None:
 
     client = _client()
     if args.kind == "ranking":
-        items = build_ranking_items(client, args.max or MAX_RANKING_ITEMS)
+        skip = _existing_ranking_pairs(client)
+        print(f"{len(skip)} ranking items already in the dataset (will be skipped)")
+        items = build_ranking_items(client, args.max or MAX_RANKING_ITEMS, skip)
         dataset_name, description = (
             RANKING_DATASET,
             "Ranked-job cases exported from baseline-batch traces (Phase 3).",
