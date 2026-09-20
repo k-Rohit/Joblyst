@@ -25,6 +25,9 @@ For each job, return:
       engineering vs. software/data engineering) should score low even if the
       posting happens to mention shared buzzwords (Python, Docker, "AI/ML") —
       shared TOOLS across domains do not mean the ROLE itself is a fit.
+    - When a posting states a minimum years of experience well above the
+      candidate's Years experience, that is a hard gap. Score it below 60,
+      however well the skills match.
 
     Candidate profile:
     {profile}
