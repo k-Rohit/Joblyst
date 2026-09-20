@@ -1,4 +1,4 @@
-""" The LangGraph state schema passed onto every node. """
+"""The LangGraph state schema passed onto every node."""
 
 from typing import TypedDict
 
@@ -10,9 +10,10 @@ from joblyst.schemas.schemas import (
     TailoringPack,
 )
 
+
 class AgentState(TypedDict):
-    """ The LangGraph state schema passed onto every node. """
-    
+    """The LangGraph state schema passed onto every node."""
+
     cv_text: str
     profile: Profile | None
     search_query: str | None
@@ -26,7 +27,7 @@ class AgentState(TypedDict):
     selected_job_id: str | None
     external_job_text: str | None
     ## added for the purpose of that sometimes a person may want to swtich domain/field.
-    target_role: str | None 
+    target_role: str | None
     research_notes: str | None
     fabrication_flags: int
     fabrication_report: FabricationReport | None
