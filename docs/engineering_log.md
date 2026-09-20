@@ -479,3 +479,25 @@ borderline gaps.
   before/after regression check across all 5 fixture CVs when it's fixed, not
   a spot check on one — this is exactly what `ProfileFieldAccuracy` /
   `expected_profiles.yaml` is for, once that eval exists.
+- **Adzuna job descriptions are cut to 500 characters, so the ranker scores
+  partial postings without knowing it.** Adzuna's API returns only a
+  500-character snippet, ending mid-sentence with "…". A live call returned
+  10 of 10 results at exactly 500 characters, and all 50 Adzuna postings in
+  `data/cached_jobs.json` are exactly 500 (Himalayas and Remotive run up to
+  4000). Our own limit is 4000 (`DESCRIPTION_LIMIT` in `search_job.py`), and the
+  ranker reads the first 1500 characters, so neither is the cause. Adzuna is
+  most of the India data, so most ranked jobs are affected.
+  What goes wrong: a requirement that appears after character 500 ("5+ years",
+  "Databricks mandatory", "early-career not a fit") is invisible, and nothing in
+  the prompt says the text is partial, so the model treats a missing
+  requirement as no requirement. It falls back on title cues ("Senior", "L3",
+  "Advanced") and sometimes invents gaps. The experience-gap rule cannot fire
+  when the years figure is in the hidden part. Seen while labeling
+  `joblyst-ranking-cases`: the Honeywell "Advanced Data Scientist" and
+  Deutsche Bank "L3" roles were both scored 60 for junior candidates.
+  Options, cheapest first: (1) tell the prompt the text may be cut off and not to
+  assume a requirement is absent; (2) fetch the full page from Adzuna's
+  `redirect_url` for ranked jobs (real text, but one extra request per job, and
+  those pages may block scrapers, untested); (3) lean on sources that return
+  full text (mostly remote jobs, not India). Measure any fix against the
+  labeled ranking set before and after.
