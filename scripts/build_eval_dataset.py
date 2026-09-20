@@ -1,9 +1,5 @@
 """Build the ranking-cases / tailoring-cases datasets from baseline-batch traces.
 
-Phase 3: real Opik traces (not synthetic prompts) become dataset items, with
-provenance (trace id, thread id, span id, source tag, export time) kept in each
-item so any dataset row can be traced back to the run that produced it.
-
     uv run python scripts/build_eval_dataset.py --kind ranking            # dry run: print items
     uv run python scripts/build_eval_dataset.py --kind ranking --push     # push to Opik
     uv run python scripts/build_eval_dataset.py --kind tailoring --push
@@ -27,7 +23,7 @@ from typing import Any
 from joblyst.config import get_settings
 from joblyst.tracing import configure_opik
 
-RANKING_DATASET = "joblyst-ranking-cases"  # v2: the old "joblyst-ranking-cases" has 16 items in the earlier ad hoc nested shape — don't reuse that name until it's cleaned up
+RANKING_DATASET = "joblyst-ranking-cases"
 TAILORING_DATASET = "joblyst-tailoring-cases"
 RANKING_TAG = "baseline-batch"
 TAILORING_TAG = "tailor-batch"
