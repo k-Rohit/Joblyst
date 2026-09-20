@@ -27,8 +27,8 @@ RANKING_DATASET = "joblyst-ranking-cases"
 TAILORING_DATASET = "joblyst-tailoring-cases"
 RANKING_TAG = "baseline-batch"
 TAILORING_TAG = "tailor-batch"
-MAX_RANKING_ITEMS = 40  # cap on NEW items per build
-GOOD_FIT_THRESHOLD = 60  # same bar the search loop uses for a good match
+MAX_RANKING_ITEMS = 40
+GOOD_FIT_THRESHOLD = 60
 GOOD_FIT_PER_TRACE = 5
 MAX_TAILORING_ITEMS = 30
 
