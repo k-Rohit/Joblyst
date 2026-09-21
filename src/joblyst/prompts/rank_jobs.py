@@ -1,9 +1,4 @@
-"""Prompt for the job-ranking node.
-
-Maintainer note: this prompt is intentionally left unoptimized (it is the target
-of the Phase 3 prompt optimizer). Keep it to clear instructions and the correct
-output schema — no few-shot examples or chain-of-thought scaffolding.
-"""
+"""Prompt for the job-ranking node."""
 
 RANK_JOBS_PROMPT_NAME = "rank_jobs"
 
@@ -28,6 +23,13 @@ For each job, return:
     - When a posting states a minimum years of experience well above the
       candidate's Years experience, that is a hard gap. Score it below 60,
       however well the skills match.
+    - Some descriptions are marked "(description cut off)". For those you see
+      only the start of the posting. Do not assume a requirement is absent just
+      because you cannot see it. Never state a years-of-experience figure or a
+      required skill unless it appears in the text you were given. Instead, judge
+      seniority from the job title (Senior, Lead, Principal, Director, Advanced, L3)
+      against the candidate's Years experience: if the title is clearly above the
+      candidate's level, score below 60.
 
     Candidate profile:
     {profile}

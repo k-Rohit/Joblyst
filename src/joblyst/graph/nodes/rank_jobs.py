@@ -38,6 +38,14 @@ def _render_profile(profile: Profile, target_role: str | None = None) -> str:
     return base
 
 
+DESCRIPTION_CHARS = 1500
+
+
+def _is_cut_off(description: str) -> bool:
+    # Adzuna snippets end in "…"; long postings are clipped by our own slice below.
+    return len(description) > DESCRIPTION_CHARS or description.rstrip().endswith("…")
+
+
 def _render_jobs(jobs: list[JobPosting]) -> str:
     """Format a batch of jobs as plain text for the ranking prompt."""
     return "\n\n---\n\n".join(
@@ -45,7 +53,8 @@ def _render_jobs(jobs: list[JobPosting]) -> str:
         f"title: {job.title}\n"
         f"company: {job.company}\n"
         f"location: {job.location} (remote: {job.remote})\n"
-        f"description: {job.description[:1500]}"
+        f"description{' (description cut off)' if _is_cut_off(job.description) else ''}: "
+        f"{job.description[:DESCRIPTION_CHARS]}"
         for job in jobs
     )
 

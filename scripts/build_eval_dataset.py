@@ -106,6 +106,9 @@ def build_ranking_items(
     for trace in traces:
         state = _as_dict(getattr(trace, "output", None))
         profile = _as_dict(state.get("profile"))
+        # target_role lives on the trace INPUT, not the output state; the ranker's
+        # prompt changes with it, so a replay must carry it too.
+        target_role = _as_dict(getattr(trace, "input", None)).get("target_role")
         ranked = [_as_dict(r) for r in state.get("ranked_jobs") or []]
         if not profile or not ranked:
             continue
@@ -136,6 +139,7 @@ def build_ranking_items(
                     "matched_skills": entry.get("matched_skills", []),
                     "gaps": entry.get("gaps", []),
                     "rank_index": index,
+                    "target_role": target_role,
                     "provenance": _add_metadata(trace, None, RANKING_TAG),
                 }
             )
