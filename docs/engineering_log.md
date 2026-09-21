@@ -456,6 +456,16 @@ borderline gaps.
 
 **Result.** All five prompts now exist in Opik with version 1 (verified with `get_prompt_history`). From here, every prompt edit creates a new version automatically. The fabrication judge prompt (`drift_check`, moved from `validation_hybrid.py` into `prompts/`) is registered too, since its wording decides what counts as a flag. Earlier rank_jobs versions were not backfilled, so its history starts at the current text. Next step: attach the prompt version to eval experiments so a score change can be tied to a prompt change.
 
+## 2026-09-21 · Ranking eval replay left out `target_role`, so pivot items looked like regressions
+
+**Symptom.** The first full ranking eval over the 46 labeled items scored `score_on_right_side` 0.870 (40 of 46). Three of the six misses were Kumar's AI-role jobs, which all scored 15-40 points lower on replay than in the original run (for example 70 to 55, 80 to 40).
+
+**Root cause.** The original `ai_engineer_pivot` run passed `target_role = "AI Engineer"`, and the ranker adds a note to the profile for it ("weigh skills/projects over past job titles"). The dataset items never stored `target_role`, so the replay ranked those jobs for a plain Data Engineer. The eval asked a different question than the one the labels were made for. `target_role` lives on the trace input, not the output the builder read.
+
+**Fix.** `build_eval_dataset.py` now stores `target_role` (read from the trace input) in every ranking item, the 46 existing items were backfilled in place (ids and labels unchanged, checked), and the eval task passes it into `rank_jobs`.
+
+**Result.** Rerun: 0.891 (41 of 46). The AI-role misses from the missing note are gone. Measured run-to-run randomness on the 39 non-pivot items: 36 identical scores, max difference 10 points, 1 item changing side of 60 (Honeywell, 55 to 65). The larger gap that remains is replay versus the original scores (mean 7.5 points, 8 items off by 15 or more), because the originals were scored 4 jobs per prompt and the replay scores one job per call. Still open: the job's `remote` flag is not stored either, so the replay always sends `remote=False` (12 of the 46 originals were remote).
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
@@ -501,3 +511,12 @@ borderline gaps.
   those pages may block scrapers, untested); (3) lean on sources that return
   full text (mostly remote jobs, not India). Measure any fix against the
   labeled ranking set before and after.
+  Tried and not adopted (2026-09-21): a prompt rule marking cut-off descriptions
+  and judging seniority from the job title, with the ranker told which postings
+  are cut off. On the 46 labeled items it fixed 2 misses (Honeywell Advanced
+  Data Scientist, Deutsche Bank L3 Data Engineer) and broke 2 (Capco Data
+  Engineer, where the model treated the missing text itself as a reason to
+  score lower, and Priya's Senior Data Analyst, where it used the profile's
+  `mid` label and ignored her 11 years). Net change 0.891 to 0.891. The full
+  posting cannot be fetched (Adzuna's redirect pages return 403), so this stays
+  a data limit of the free API.
