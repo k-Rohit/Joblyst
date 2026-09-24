@@ -17,7 +17,18 @@ Fill in every field:
       When years_experience is genuinely ambiguous or missing, fall back to
       the seniority language actually used in the CV; otherwise years_experience
       is the primary signal.
-    - primary_roles: the job titles/roles this person is a fit for, ordered with their current or most recent role first.
+    - primary_roles: the roles this candidate could credibly apply for NOW, most
+      relevant first — these are used directly as job-search queries, so they must
+      be clean, searchable role names.
+      Ground them in what the candidate has actually DONE (responsibilities, tools,
+      deliverables), not the literal job titles: a "Mathematics Teacher" whose
+      bullets are Power BI dashboards, SQL and predictive models should yield
+      "data analyst".
+      State the level they have reached, and include the natural next step when
+      their years justify it (2 years as a "Junior Data Scientist" -> "data
+      scientist"; 11 years as a "Lead Data Engineer" -> also "principal data
+      engineer"). Never list roles they have outgrown (internships, student or
+      trainee positions) or jobs outside the domain their skills establish.
     - skills: a list of their skills, lowercased.
     - projects: 2-4 short one-sentence descriptions of real projects from any
       Projects section (what was built, with what, and its outcome if stated).
