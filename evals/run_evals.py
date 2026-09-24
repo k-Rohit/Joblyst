@@ -1,17 +1,23 @@
 """Offline evals over the frozen, human-labeled datasets.
 
-    uv run python -m evals.run_evals --suite ranking            # prints the plan, stops
-    uv run python -m evals.run_evals --suite ranking --yes      # runs, logs an Opik experiment
+    uv run python -m evals.run_evals --suite ranking             # prints the plan, stops
+    uv run python -m evals.run_evals --suite ranking --yes       # runs, logs an Opik experiment
     uv run python -m evals.run_evals --suite ranking --yes --limit 5
+    uv run python -m evals.run_evals --suite extraction --yes
 
 ranking: replays ONLY the ranking step on each frozen (profile, job) pair with the current
 prompt and model, then checks the new score against the human label.
+
+extraction: re-runs extract_profile on each fixture CV's text and checks the result
+field-by-field against data/labels/expected_profiles.yaml (a human wrote the expected
+values, not the model). Needs scripts/build_extraction_dataset.py --push run first.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -21,6 +27,8 @@ from joblyst.tracing import configure_opik, register_prompts
 REPORT_DIR = Path(__file__).resolve().parent.parent / "reports"
 RANKING_DATASET = "joblyst-ranking-cases"
 RANKING_PROMPT_NAME = "rank_jobs"
+EXTRACTION_DATASET = "joblyst-extraction-cases"
+EXTRACTION_PROMPT_NAME = "extract_profile"
 
 
 def _client():
@@ -120,9 +128,80 @@ def _report_items(result) -> None:
     print(f"per-item results saved to {path}")
 
 
+def run_extraction(limit: int | None) -> None:
+    from opik.evaluation import evaluate
+
+    from evals.metrics import ProfileFieldAccuracy
+    from joblyst.profile import extract_profile
+
+    register_prompts()  # so the prompt version linked below is the one on disk
+    client = _client()
+    dataset = client.get_dataset(name=EXTRACTION_DATASET)
+    prompt = client.get_prompt(name=EXTRACTION_PROMPT_NAME)
+
+    def task(item: dict) -> dict:
+        # thread_id=None: no tracer, so this doesn't create its own thread —
+        # evaluate() already logs each call under the experiment.
+        profile = extract_profile(item["cv_text"], thread_id=None)
+        return {"new_profile": profile.model_dump()}
+
+    result = evaluate(
+        dataset=dataset,
+        task=task,
+        scoring_metrics=[ProfileFieldAccuracy()],
+        experiment_config={"model": get_settings().llm_model, "suite": "extraction"},
+        prompt=prompt,
+        nb_samples=limit,
+        task_threads=2,
+    )
+    try:
+        result.print()
+    except Exception:  # noqa: BLE001 - printing is cosmetic
+        print("experiment logged to Opik")
+    _report_extraction(result)
+
+
+def _report_extraction(result) -> None:
+    """Print per-field mean accuracy and every CV with a wrong field, expected vs. got."""
+    per_field_values: dict[str, list[float]] = {}
+    rows = []
+    for tr in result.test_results:
+        item = tr.test_case.dataset_item_content
+        score = next(s for s in tr.score_results if s.name == "profile_field_accuracy")
+        per_field = (score.metadata or {}).get("per_field", {})
+        for field, value in per_field.items():
+            per_field_values.setdefault(field, []).append(value)
+        rows.append(
+            {
+                "cv_file": item["cv_file"],
+                "overall": score.value,
+                "per_field": per_field,
+                "expected": item["expected"],
+                "new_profile": tr.test_case.task_output["new_profile"],
+            }
+        )
+
+    print("\n| field | mean accuracy |\n|---|---|")
+    for field, values in sorted(per_field_values.items()):
+        print(f"| {field} | {statistics.mean(values):.3f} |")
+
+    misses = [r for r in rows if r["overall"] < 1.0]
+    print(f"\n{len(misses)} of {len(rows)} CVs with at least one field off:")
+    for r in misses:
+        wrong = {f: v for f, v in r["per_field"].items() if v < 1.0}
+        print(f"  {r['cv_file']}: {wrong}")
+        for field in wrong:
+            print(f"      {field}: expected={r['expected'].get(field)!r} got={r['new_profile'].get(field)!r}")
+
+    REPORT_DIR.mkdir(exist_ok=True)
+    path = REPORT_DIR / f"extraction_eval_{result.experiment_name}.json"
+    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+    print(f"per-item results saved to {path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run offline evals")
-    parser.add_argument("--suite", choices=["ranking"], required=True)
+    parser.add_argument("--suite", choices=["ranking", "extraction"], required=True)
     parser.add_argument(
         "--yes", action="store_true", help="run without stopping at the plan"
     )
@@ -131,16 +210,23 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    n = args.limit or 46
+    default_n = 46 if args.suite == "ranking" else 5
+    n = args.limit or default_n
     print(
         f"suite: {args.suite}, items: up to {n}, model: {get_settings().joblyst_model}"
     )
-    print(f"cost: ~{n} single-job ranking calls (a few cents)")
+    if args.suite == "ranking":
+        print(f"cost: ~{n} single-job ranking calls (a few cents)")
+    else:
+        print(f"cost: ~{n} profile extraction calls (a few cents)")
     if not args.yes:
         print("\nRe-run with --yes to execute.")
         sys.exit(0)
 
-    run_ranking(args.limit)
+    if args.suite == "ranking":
+        run_ranking(args.limit)
+    else:
+        run_extraction(args.limit)
 
 
 if __name__ == "__main__":
