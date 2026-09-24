@@ -466,6 +466,34 @@ borderline gaps.
 
 **Result.** Rerun: 0.891 (41 of 46). The AI-role misses from the missing note are gone. Measured run-to-run randomness on the 39 non-pivot items: 36 identical scores, max difference 10 points, 1 item changing side of 60 (Honeywell, 55 to 65). The larger gap that remains is replay versus the original scores (mean 7.5 points, 8 items off by 15 or more), because the originals were scored 4 jobs per prompt and the replay scores one job per call. Still open: the job's `remote` flag is not stored either, so the replay always sends `remote=False` (12 of the 46 originals were remote).
 
+## 2026-09-24 · Profile extraction had never been measured; first run scored 0.59
+
+**Symptom.** `extract_profile` runs on every search, but nothing checked its output. Bugs in it were invisible: a wrong `primary_roles` silently becomes the job-search query (`fetch_jobs.py` uses `" ".join(profile.primary_roles[:2])` when the LLM supplies no query), so a bad extraction quietly searches for the wrong jobs.
+
+**Root cause.** No eval existed. `data/labels/expected_profiles.yaml` had 5 hand-verified entries sitting unused since Phase 1.
+
+**Fix.** Added `scripts/build_extraction_dataset.py` (yaml + fixture CV text -> Opik dataset `joblyst-extraction-cases`, verified entries only) and a `ProfileFieldAccuracy` metric in `evals/metrics.py`, wired as `--suite extraction` in `evals/run_evals.py`. Scoring is deterministic, no judge: exact match for `seniority`/`remote_ok`, 0.5-year tolerance for `years_experience`, and set F1 for the list fields. `projects` is deliberately not scored (free text, and its known bug is tracked separately).
+
+**Result.** First run: **0.588** mean field accuracy over 5 CVs. Per field: skills 0.983, locations 0.647, remote_ok 0.600, seniority 0.600, years_experience 0.600, primary_roles 0.550, languages **0.000**. Six real defects surfaced on the first run, none of which anything had caught before:
+- `languages` comes back `[]` on all 5 CVs. The prompt says only "spoken languages" and gives no rule for a CV that does not state one explicitly.
+- `career_changer_in`: expected `seniority: junior` / `years_experience: None` (11 years of *teaching*, ~0 in data), got `mid` / `11.0` — teaching years counted as data experience.
+- `senior_mle_in`: `seniority` expected senior, got lead (off by one rung).
+- `remote_ok` wrong on 2 of 5, including a CV that says "Open to hybrid".
+- `locations` lists every city in the CV (past offices included) instead of where the candidate can work.
+- `primary_roles` transcribed job history verbatim, including `undergraduate research assistant`.
+
+Worth noting: the reference repo wrote this same suite but never ran it — its labels were left `verified: false`, so its report has no number here.
+
+## 2026-09-24 · primary_roles was transcribing job history instead of searchable roles
+
+**Symptom.** `primary_roles` scored 0.550. On `junior_ds_in` it returned `['junior data scientist', 'data science intern', 'undergraduate research assistant']` where the label is `['data scientist']`. Since `primary_roles[:2]` becomes the fallback search query, that output makes the agent search for internships.
+
+**Root cause.** One self-contradicting line in the prompt: "the job titles/roles this person is a fit for" (forward-looking) "ordered with their current or most recent role first" (backward-looking). The model resolved the contradiction by listing employment history, and only scored well when a candidate's past titles happened to equal their target roles.
+
+**Fix.** Rewrote the `primary_roles` instruction to state what the field is *for* (search queries, so clean searchable names), to ground roles in responsibilities rather than titles (a "Mathematics Teacher" doing Power BI and predictive models yields "data analyst"), to keep the level reached and add the natural next step, and to exclude outgrown roles (internships, student positions) and off-domain jobs.
+
+**Result.** `primary_roles` 0.550 -> **0.620**, overall 0.569 -> 0.588. Mixed, not a clean win: 3 CVs improved, 2 regressed. The "never list outgrown roles" clause worked everywhere it applied (`junior_ds_in` 0.00 -> 1.00, dropping the intern and research-assistant entries). The "include the natural next step" clause backfired — the model *replaces* held roles with invented ones rather than adding: `senior_mle_in` went 1.00 -> 0.40 (dropped `senior machine learning engineer` and `data scientist`, invented `ml platform lead`) and `lead_in_remote` 0.75 -> 0.50 (dropped the held `senior data engineer`, invented `data architect`). Still open: make next-step roles explicitly additive. With only 5 CVs each one moves the mean by 20%, so this number is directional at best.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

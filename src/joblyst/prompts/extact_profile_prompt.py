@@ -37,7 +37,6 @@ Fill in every field:
       not formal roles. Leave empty if there is no Projects section.
     - years_experience: total years of professional experience as a number, or null.
     - locations: locations where they could work.
-    - languages: spoken languages.
     - remote_ok: true if they are open to remote work.
     - raw_summary: a 3-4 sentence summary, starting with their most recent experience.
 

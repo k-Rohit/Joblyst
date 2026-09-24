@@ -46,9 +46,8 @@ SCORED_FIELDS = (
     "primary_roles",
     "skills",
     "locations",
-    "languages",
 )
-LIST_FIELDS = {"primary_roles", "skills", "locations", "languages"}
+LIST_FIELDS = {"primary_roles", "skills", "locations"}
 YEARS_TOLERANCE = 0.5  # extraction reads years off a CV; treat rounding as correct
 
 

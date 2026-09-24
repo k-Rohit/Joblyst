@@ -23,7 +23,6 @@ class Profile(BaseModel):
     projects: list[str] = Field(default_factory=list)
     years_experience: float | None = None
     locations: list[str] = Field(default_factory=list)
-    languages: list[str] = Field(default_factory=list)
     remote_ok: bool = False
     raw_summary: str = ""
     

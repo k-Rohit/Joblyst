@@ -6,7 +6,7 @@
 # real PDF and flips it to true. An entry only enters the eval dataset once
 # verified: true. Fields mirror joblyst.schemas.schemas.Profile; only the
 # fields ProfileFieldAccuracy actually scores are listed here (seniority,
-# remote_ok, years_experience, locations, languages, primary_roles, skills).
+# remote_ok, years_experience, locations, primary_roles, skills).
 # `name` is kept for readability only — it isn't scored.
 #
 # `projects` is listed too but NOT currently scored by any metric (it's free
@@ -45,8 +45,6 @@
     years_experience: 2.0
     locations:
       - Bengaluru, India
-    languages:
-      - english
     # AMBIGUOUS: contact line says "Open to hybrid", not "remote". Hybrid is
     # not the same claim as remote_ok — decide how the extractor should treat
     # this, then check what it actually did.
@@ -93,8 +91,6 @@
     years_experience: 8.0
     locations:
       - Hyderabad, India
-    languages:
-      - english
     remote_ok: false
     # No Projects section anywhere in this CV -> this is the regression check.
     projects: []
@@ -124,8 +120,6 @@
     years_experience: null
     locations:
       - Bengaluru, India
-    languages:
-      - english
     remote_ok: true
     # This CV is deliberately projects-heavy (career-changer pivot evidence).
     projects:
@@ -163,8 +157,6 @@
     years_experience: 11.0
     locations:
       - Pune, India
-    languages:
-      - english
     # Contact line explicitly says "Open to remote only" — this one isn't
     # ambiguous like Ananya's; a false here would be a real extraction miss.
     remote_ok: true
@@ -194,8 +186,6 @@
     years_experience: 4.0
     locations:
       - Gurugram, India
-    languages:
-      - english
     remote_ok: false
     # No Projects section (has ACHIEVEMENTS instead) -> regression check.
     projects: []
