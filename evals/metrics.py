@@ -39,6 +39,71 @@ class SkillsInProfile(base_metric.BaseMetric):
         )
 
 
+SCORED_FIELDS = (
+    "seniority",
+    "remote_ok",
+    "years_experience",
+    "primary_roles",
+    "skills",
+    "locations",
+    "languages",
+)
+LIST_FIELDS = {"primary_roles", "skills", "locations", "languages"}
+YEARS_TOLERANCE = 0.5  # extraction reads years off a CV; treat rounding as correct
+
+
+def _normalize_set(values: list[str] | None) -> set[str]:
+    return {str(v).strip().lower() for v in (values or []) if str(v).strip()}
+
+
+def _field_score(field: str, expected: object, actual: object) -> float:
+    """1.0/0.0 for scalars; F1 over the normalized sets for list fields."""
+    if field in LIST_FIELDS:
+        exp, act = _normalize_set(expected), _normalize_set(actual)  # type: ignore[arg-type]
+        if not exp and not act:
+            return 1.0
+        if not exp or not act:
+            return 0.0
+        precision = len(exp & act) / len(act)
+        recall = len(exp & act) / len(exp)
+        return 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+
+    if field == "years_experience":
+        if expected is None and actual is None:
+            return 1.0
+        if expected is None or actual is None:
+            return 0.0
+        return 1.0 if abs(float(expected) - float(actual)) <= YEARS_TOLERANCE else 0.0  # type: ignore[arg-type]
+
+    if isinstance(expected, str) or isinstance(actual, str):
+        return 1.0 if str(expected).strip().lower() == str(actual).strip().lower() else 0.0
+
+    return 1.0 if expected == actual else 0.0
+
+
+class ProfileFieldAccuracy(base_metric.BaseMetric):
+    """Per-field accuracy of extract_profile against a human-verified expected Profile.
+
+    ``projects`` is deliberately not scored — free text with no clean scoring
+    function, and a known bug (see engineering_log.md) means the extractor
+    doesn't reliably leave it empty; that's tracked separately, not here.
+    """
+
+    def __init__(self, name: str = "profile_field_accuracy") -> None:
+        super().__init__(name=name)
+
+    def score(self, expected: dict, new_profile: dict, **_: object) -> ScoreResult:
+        per_field = {f: _field_score(f, expected.get(f), new_profile.get(f)) for f in SCORED_FIELDS}
+        overall = sum(per_field.values()) / len(per_field)
+        wrong = [f for f, v in per_field.items() if v < 1.0]
+        return ScoreResult(
+            name=self.name,
+            value=overall,
+            reason=f"off on: {wrong}" if wrong else "every scored field matched",
+            metadata={"per_field": per_field},
+        )
+
+
 class ScoreOnRightSide(base_metric.BaseMetric):
     """1.0 when the new score lands on the side of 60 the human's label says it should."""
 
