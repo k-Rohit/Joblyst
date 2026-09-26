@@ -57,10 +57,14 @@ def route_entry(state: AgentState) -> str:
 
 
 def should_reformulate(state: AgentState) -> str:
-    """ 
+    """
     Route after ranking: loop to broaden the search, or finish.
-    
-    find the number of good jobs (the jobs where the fit score is > 60) if the count of good jobs > MIN_GOOD_JOBS then we dont need to reformulate other wise we have to.
+
+    Count the good jobs (fit_score >= GOOD_FIT_THRESHOLD, so exactly 60 counts).
+    Reformulate only when BOTH are true: fewer than MIN_GOOD_JOBS good ones, and
+    we are still under MAX_REFFORMULATIONS. The second condition is what ends the
+    run for a candidate who never reaches the bar — without it the loop would
+    keep searching until the LLM budget raised instead.
     """
 
     ranked_jobs = state.get("ranked_jobs",[])

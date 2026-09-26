@@ -8,12 +8,14 @@ reformulation loop the reformulated query is passed as guidance for a fresh call
 """
 from __future__ import annotations
 
+import re
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from joblyst.config import get_settings
 from joblyst.graph.state import AgentState
 from joblyst.llm import ensure_budget, get_chat_model
-from joblyst.schemas.schemas import JobPosting
+from joblyst.schemas.schemas import JobPosting, Profile
 from joblyst.tools.search_job import run_search, search_jobs
 
 MERGED_CEILING = 25  # caps the TOTAL accumulated across reformulation loops, not any single search
@@ -25,6 +27,11 @@ _SYSTEM = (
     "current role at the right seniority, and NOTHING else. Two to four words.\n"
     "Never append skills, technologies, tools or synonyms. Every extra term "
     "narrows the match, and a long query returns nothing at all.\n"
+    "Search for ONE role only. Boards match the query against a single title, so "
+    "a list matches nothing: no 'OR', no 'AND', no commas, no slashes. If the "
+    "candidate has held several roles, pick the one title that best describes "
+    "them now.\n"
+    "Bad:  'data analyst OR business analyst' · 'data engineer, data scientist'\n"
     "Good: 'senior data scientist' · 'machine learning engineer' · 'staff backend engineer'\n"
     "Bad:  'senior data scientist AI engineer deep learning LLMs RAG vector databases'\n"
     "Pick a country code from their location and set the remote flag from their preference."
@@ -34,6 +41,10 @@ _SYSTEM = (
 # here. Real titles run 2-4 words; 6 leaves room for "(all genders)"-style
 # padding without letting a skill list through.
 MAX_QUERY_WORDS = 6
+
+# Standalone "or"/"and" plus comma/semicolon/pipe: the shapes that mean "a list of
+# roles". Not slash or ampersand — "AI/ML engineer", "R&D engineer" are real titles.
+_QUERY_SEPARATORS = re.compile(r"\s+(?:or|and)\s+|\s*[,;|]\s*", re.IGNORECASE)
 
 def _build_prompt(state: AgentState) -> str:
     """ Describe the candiidtae to the LLM, adding reformulation guidance if looping.
@@ -99,13 +110,13 @@ def fetch_jobs(state: AgentState) -> dict:
         sources: list[str] = []
         for call in message.tool_calls:
             args = call["args"]
-            call_query = args.get("query") or " ".join(profile.primary_roles[:2])
+            call_query = args.get("query") or _fallback_query(profile)
             call_query, dropped = _trim_query(call_query)
             if dropped:
                 # Visible in the trace rather than silent: a query that needed
                 # trimming is the early warning that the sources are about to
                 # return nothing and the fallback board is about to fill in.
-                errors.append(f"fetch_jobs: query trimmed to {MAX_QUERY_WORDS} words, dropped {dropped!r}")
+                errors.append(f"fetch_jobs: query cut back to a single title, dropped {dropped!r}")
             country = args.get("country")
             remote = bool(args.get("remote", profile.remote_ok))
             query = query or call_query  # the state's search_query is the first call's, for reformulation messaging
@@ -116,7 +127,7 @@ def fetch_jobs(state: AgentState) -> dict:
             sources.extend(s for s in call_sources if s not in sources)
     else:
         errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
-        query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
+        query = _fallback_query(profile)
         jobs, sources = run_search(
             query=query, location=location, country=None, remote=profile.remote_ok, limit=settings.joblyst_max_jobs
         )
@@ -131,18 +142,47 @@ def fetch_jobs(state: AgentState) -> dict:
         "llm_calls": calls,
     }
 
+def _fallback_query(profile: Profile) -> str:
+    """The query to search when the LLM supplies none.
+
+    One role, not two: joining the first two primary_roles produced "data analyst
+    business analyst", which is the same unsearchable list the prompt now forbids —
+    boards match one title, so a concatenation of two matches nothing.
+    """
+    if profile.primary_roles:
+        return profile.primary_roles[0].strip()
+    return " ".join(profile.skills[:3])
+
+
 def _trim_query(query: str) -> tuple[str, str]:
-    """Cut a query back to a title-length phrase.
+    """Cut a query back to a single title-length phrase.
 
     Returns the kept phrase and whatever was dropped (empty when nothing was).
-    Keeping the *first* words is deliberate: both models we tested lead with the
-    role title and then trail off into skills, so the front of the string is the
-    part worth searching for.
+    Boards match a query against job TITLES literally, so two shapes have to go:
+    a LIST of roles ("data analyst OR business analyst"), which matches no posting
+    at all because none is titled that; and a title trailing off into skills.
+    Keeping the *first* segment is deliberate: the models lead with the role title.
+
+    Splitting on separators happens BEFORE the word cut, or a long list gets
+    truncated mid-expression into a trailing "OR" — which is worse than either
+    input, and is exactly what shipped (see engineering_log.md).
+    Slash and ampersand are deliberately not separators: "AI/ML engineer" and
+    "R&D engineer" are real single titles.
     """
-    words = query.split()
-    if len(words) <= MAX_QUERY_WORDS:
-        return query.strip(), ""
-    return " ".join(words[:MAX_QUERY_WORDS]), " ".join(words[MAX_QUERY_WORDS:])
+    kept = query.strip()
+    dropped: list[str] = []
+
+    segments = [s.strip() for s in _QUERY_SEPARATORS.split(kept) if s.strip()]
+    if len(segments) > 1:
+        kept = segments[0]
+        dropped.append(" ".join(segments[1:]))
+
+    words = kept.split()
+    if len(words) > MAX_QUERY_WORDS:
+        kept = " ".join(words[:MAX_QUERY_WORDS])
+        dropped.append(" ".join(words[MAX_QUERY_WORDS:]))
+
+    return kept, " ".join(dropped)
 
 def _dedupe_with_existing(existing: list[JobPosting], new: list[JobPosting]) -> list[JobPosting]:
     """On a reformulation loop, merge new results with prior ones, deduped."""
