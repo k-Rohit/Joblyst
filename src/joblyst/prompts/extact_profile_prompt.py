@@ -35,7 +35,19 @@ Fill in every field:
       This exists specifically for candidates targeting a different domain than
       their job titles suggest — their pivot evidence often lives in projects,
       not formal roles. Leave empty if there is no Projects section.
-    - years_experience: total years of professional experience as a number, or null.
+    - years_experience: years of PAID professional experience in the field this CV
+      positions them for, as a number, or null. Self-teaching, courses, bootcamps
+      and personal projects are not professional experience, and neither are years
+      in an unrelated profession. Worked examples (durations, not dates — compute
+      the candidate's own from their date ranges):
+        * "Backend engineer for 6 years across two companies. Python, Go."
+          -> years_experience: 6
+        * "Registered nurse of 8 years. Completed a data analytics bootcamp last
+          year, three portfolio projects since." -> years_experience: null
+          (8 years of nursing is not analytics experience, and a bootcamp is not
+          paid work — so there is no honest number to report)
+        * "Marketing manager for 6 years, then data analyst at Acme for the last 5."
+          -> years_experience: 5  (only the analyst years count)
     - locations: locations where they could work.
     - remote_ok: true if they are open to remote work.
     - raw_summary: a 3-4 sentence summary, starting with their most recent experience.

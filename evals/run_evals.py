@@ -128,7 +128,7 @@ def _report_items(result) -> None:
     print(f"per-item results saved to {path}")
 
 
-def run_extraction(limit: int | None) -> None:
+def run_extraction(limit: int | None, model: str | None = None) -> None:
     from opik.evaluation import evaluate
 
     from evals.metrics import ProfileFieldAccuracy
@@ -142,14 +142,14 @@ def run_extraction(limit: int | None) -> None:
     def task(item: dict) -> dict:
         # thread_id=None: no tracer, so this doesn't create its own thread —
         # evaluate() already logs each call under the experiment.
-        profile = extract_profile(item["cv_text"], thread_id=None)
+        profile = extract_profile(item["cv_text"], thread_id=None, model=model)
         return {"new_profile": profile.model_dump()}
 
     result = evaluate(
         dataset=dataset,
         task=task,
         scoring_metrics=[ProfileFieldAccuracy()],
-        experiment_config={"model": get_settings().llm_model, "suite": "extraction"},
+        experiment_config={"model": model or get_settings().llm_model, "suite": "extraction"},
         prompt=prompt,
         nb_samples=limit,
         task_threads=2,
@@ -208,13 +208,15 @@ def main() -> None:
     parser.add_argument(
         "--limit", type=int, default=None, help="only the first N dataset items"
     )
+    parser.add_argument(
+        "--model", default=None, help="override the task model, e.g. openai:gpt-5-mini (extraction only)"
+    )
     args = parser.parse_args()
 
     default_n = 46 if args.suite == "ranking" else 5
     n = args.limit or default_n
-    print(
-        f"suite: {args.suite}, items: up to {n}, model: {get_settings().joblyst_model}"
-    )
+    task_model = args.model or (get_settings().joblyst_model if args.suite == "ranking" else get_settings().llm_model)
+    print(f"suite: {args.suite}, items: up to {n}, model: {task_model}")
     if args.suite == "ranking":
         print(f"cost: ~{n} single-job ranking calls (a few cents)")
     else:
@@ -226,7 +228,7 @@ def main() -> None:
     if args.suite == "ranking":
         run_ranking(args.limit)
     else:
-        run_extraction(args.limit)
+        run_extraction(args.limit, args.model)
 
 
 if __name__ == "__main__":
