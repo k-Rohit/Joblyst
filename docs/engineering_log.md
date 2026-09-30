@@ -494,6 +494,24 @@ Worth noting: the reference repo wrote this same suite but never ran it — its 
 
 **Result.** `primary_roles` 0.550 -> **0.620**, overall 0.569 -> 0.588. Mixed, not a clean win: 3 CVs improved, 2 regressed. The "never list outgrown roles" clause worked everywhere it applied (`junior_ds_in` 0.00 -> 1.00, dropping the intern and research-assistant entries). The "include the natural next step" clause backfired — the model *replaces* held roles with invented ones rather than adding: `senior_mle_in` went 1.00 -> 0.40 (dropped `senior machine learning engineer` and `data scientist`, invented `ml platform lead`) and `lead_in_remote` 0.75 -> 0.50 (dropped the held `senior data engineer`, invented `data architect`). Still open: make next-step roles explicitly additive. With only 5 CVs each one moves the mean by 20%, so this number is directional at best.
 
+## 2026-09-26 · A trimmed query left a dangling "OR" and matched no job at all
+
+**Symptom.** In a `baseline-batch` trace the search query was `'Data Analyst OR Business Analyst OR'`. No posting is titled that, so the search came back nearly empty: 10 jobs, remotive only, adzuna contributed nothing. The only sign of trouble was an `errors` entry saying the query had been trimmed.
+
+**Root cause.** Two independent bugs feeding the same path.
+1. `_trim_query` cut by word count alone. The LLM returned `'Data Analyst OR Business Analyst OR Analytics Intern'` (7 words), the limit is 6, so it kept the first 6 words and left the trailing `OR`. Truncating a list mid-expression produced a query worse than either the original or a clean cut.
+2. `_fallback_query` (then inline as `" ".join(profile.primary_roles[:2])`) concatenated two roles into `'data analyst business analyst'` — the same unsearchable shape, reached whenever the LLM supplied no query.
+
+Underneath both: the prompt forbade appending skills but never forbade a *list* of roles, and boards match a query against one job title literally.
+
+**Fix.** `_trim_query` now splits on list separators (standalone `or`/`and`, comma, semicolon, pipe) **before** the word cut and keeps the first segment; slash and ampersand are deliberately not separators, since `AI/ML engineer` and `R&D engineer` are real titles. `_fallback_query` takes `primary_roles[0]`, not two joined. The system prompt states the one-role rule with a worked bad example. The error message no longer claims "trimmed to 6 words", which was untrue for the list case.
+
+**Result.** Re-ran the real `fetch_jobs` LLM call over all 6 fixture profiles plus the AI-Engineer pivot case: **every query came back clean, 0 needed trimming**. `'Data Analyst OR Business Analyst OR Analytics Intern'` now yields `'Data Analyst'`. Verified the separator set leaves `AI/ML engineer`, `R&D engineer` and `lead data engineer` untouched.
+
+Accepted tradeoff: a title legitimately containing "and" gets split (`'machine learning and data engineer'` -> `'machine learning'`). Rare, and the kept half still searches sensibly.
+
+**What the fix surfaced, left unfixed by decision.** The model stopped packing roles into one `OR` query and started splitting them across separate tool calls — 2 or 3 instead of the 1 the prompt asks for, in 6 of 7 cases, stable across 5 runs at temperature 0. The multi-tool-call handling merges them correctly, so this works, but: fan-out is uncapped while `MERGED_CEILING=25` and `joblyst_max_jobs=10` mean a 3rd call's jobs are largely truncated; identical `(query, country, remote)` tuples are not deduped (`career_changer` fires `'data analyst'` twice); one pivot-case call chose `country='gb'` for a Pune candidate; and `ensure_budget` counts only the 1 LLM call, not the N search requests it authorises — which matters because Jooble's quota is 500 requests for the lifetime of the key.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
