@@ -466,7 +466,7 @@ borderline gaps.
 
 **Result.** Rerun: 0.891 (41 of 46). The AI-role misses from the missing note are gone. Measured run-to-run randomness on the 39 non-pivot items: 36 identical scores, max difference 10 points, 1 item changing side of 60 (Honeywell, 55 to 65). The larger gap that remains is replay versus the original scores (mean 7.5 points, 8 items off by 15 or more), because the originals were scored 4 jobs per prompt and the replay scores one job per call. Still open: the job's `remote` flag is not stored either, so the replay always sends `remote=False` (12 of the 46 originals were remote).
 
-## 2026-09-24 · Profile extraction had never been measured; first run scored 0.59
+## 2026-09-24 · Profile extraction had never been measured; first run scored 0.57
 
 **Symptom.** `extract_profile` runs on every search, but nothing checked its output. Bugs in it were invisible: a wrong `primary_roles` silently becomes the job-search query (`fetch_jobs.py` uses `" ".join(profile.primary_roles[:2])` when the LLM supplies no query), so a bad extraction quietly searches for the wrong jobs.
 
@@ -474,7 +474,7 @@ borderline gaps.
 
 **Fix.** Added `scripts/build_extraction_dataset.py` (yaml + fixture CV text -> Opik dataset `joblyst-extraction-cases`, verified entries only) and a `ProfileFieldAccuracy` metric in `evals/metrics.py`, wired as `--suite extraction` in `evals/run_evals.py`. Scoring is deterministic, no judge: exact match for `seniority`/`remote_ok`, 0.5-year tolerance for `years_experience`, and set F1 for the list fields. `projects` is deliberately not scored (free text, and its known bug is tracked separately).
 
-**Result.** First run: **0.588** mean field accuracy over 5 CVs. Per field: skills 0.983, locations 0.647, remote_ok 0.600, seniority 0.600, years_experience 0.600, primary_roles 0.550, languages **0.000**. Six real defects surfaced on the first run, none of which anything had caught before:
+**Result.** First run: **0.569** mean field accuracy over 5 CVs. Per field: skills 0.983, locations 0.647, remote_ok 0.600, seniority 0.600, years_experience 0.600, primary_roles 0.550, languages **0.000**. Six real defects surfaced on the first run, none of which anything had caught before:
 - `languages` comes back `[]` on all 5 CVs. The prompt says only "spoken languages" and gives no rule for a CV that does not state one explicitly.
 - `career_changer_in`: expected `seniority: junior` / `years_experience: None` (11 years of *teaching*, ~0 in data), got `mid` / `11.0` — teaching years counted as data experience.
 - `senior_mle_in`: `seniority` expected senior, got lead (off by one rung).
@@ -591,6 +591,40 @@ And it is self-defeating: "broader" was implemented as *more terms*, but a list 
 And the reformulation output itself is now a single searchable title every time: `mid_analyst` `'Data Analyst'` -> `'Business Intelligence Analyst'`, `junior_ds` `'data scientist'` -> `'data analyst'`, `career_changer` `'data analyst'` -> `'business intelligence analyst'`. The prompt change alone was enough — `_trim_query` did not have to intervene on any of the three, so it is now a backstop rather than the mechanism. Pinned by two tests in `tests/test_fetch_query.py`.
 
 Still open, deliberately: the remaining 2 calls are the **same query twice**, which is pure waste. Deduping identical `(query, country, remote)` tuples before searching would fix it, and `ensure_budget` still counts only the 1 LLM call rather than the N search requests it authorises — which matters because Jooble's quota is 500 requests for the lifetime of the key.
+
+## 2026-10-02 · The fabrication validator reported 39%; about 2% was real
+
+**Symptom.** The first tailoring batch (14 cases, 371 claims) reported `fabrication_rate: 0.388`, with every one of 13 tailored runs flagged. A model that invents 4 lines in 10 would be unusable — but reading the flags, almost none were inventions.
+
+**Root cause.** Three separate faults, all producing false alarms.
+
+1. *Stage 1 cannot tell direction.* The deterministic gate scores `difflib` similarity against the source and flags anything under 0.65. Honest summarisation scores low — "Migrated a critical Airflow DAG delivering company/account data to Salesforce CRM into a Databricks workflow, reducing latency by 40%" became "Migrated critical workflows from Airflow to Databricks, reducing data processing latency by 40%", nothing invented, ratio 0.55, flagged. All 99 deterministic flags were on prose, and every one inspected was a summary, not an invention.
+2. *The LLM judge flagged omission, which its own prompt forbids.* At least 23 of its 45 flags said "the rewrite omits...", against three explicit sentences in the prompt ("omission is never a problem", "Never flag a rewrite for what it does not say"). Some were worse than omission: "rewriting correlated subqueries" against a source saying "rewriting three correlated subqueries" was flagged as having *added* a detail — the direction of the comparison reversed. An earlier entry in this log records this omission problem as fixed by prompt wording. It was not; nothing had re-measured it, because this batch did not exist yet.
+3. *The corpus split a sentence mid-number.* "...at a p99 latency of" / "45ms." became two corpus items, because the line-join rule only treated a lowercase first letter as a continuation, and a digit is not lowercase. No single source contained the full fact, so the judge was correctly told "45ms" was absent from the source it was shown — four times.
+
+The judge was also the same model as the writer it grades (`gpt-4o-mini` for both).
+
+**Fix.**
+- `corpus.py`: a line starting with a digit now continues the previous line, like a lowercase one does. `45ms` rejoins its sentence.
+- `drift_check.py`: one stated rule — flag only for something the rewrite *states* that the source does not support; leaving things out is always fine — plus eight worked examples, four grounded (number dropped, `40M -> millions`, count dropped, synonym) and four not (added tool, changed number, invented outcome, inflated role). The examples are synthetic and from other domains, so a re-run cannot pass by memorising the claims it is measured on. The reason must now quote the exact unsupported phrase from the rewrite.
+- The judge model is a setting, `JOBLYST_JUDGE_MODEL`, defaulting to `gpt-4.1` — deliberately stronger than the tailoring model.
+- Judge calls now run at most 3 at a time with retry and backoff. With the worked examples each call is ~640 tokens and this account allows gpt-4.1 30,000 tokens per minute; firing a run's 25-40 claims at once returned HTTP 429, and since validation runs inside the graph an unhandled 429 fails the whole tailoring run.
+
+**Result.** Re-judged the same 45 claims the old judge had flagged, only the judge changing, with prompt and model separated:
+
+| judge | still flagged |
+|---|---|
+| old prompt + gpt-4o-mini | 40 / 45 |
+| new prompt + gpt-4o-mini | 32 / 45 |
+| **new prompt + gpt-4.1** | **7 / 45** |
+
+All 7 survivors are genuine, each quoting an invented phrase: "fostering a strong understanding of data analysis concepts", "improving educational outcomes and student performance", "through innovative teaching methods and data analysis", "Managed and optimized ... enhancing data accessibility". No omission flags remain. The worked examples alone barely moved the small model; the model change did most of the work.
+
+Pattern worth noting: every real fabrication is unsupported *qualitative* padding — invented outcomes and causes on the career-changer's teaching bullets, inflated verbs on the analyst's. None invented a tool or changed a number. That is where this tailoring prompt is weak.
+
+**Trade-off, accepted deliberately.** Fabrication checking went from ~1.6s (gpt-4o-mini, unlimited parallelism, measured over 16 runs) to slower — a bigger model per call, and capped parallelism. Judged acceptable: tailoring is a one-off action the user already waits ~14s for, and a check that flags 39% of lines trains users to ignore it, which hides the 2% that matter.
+
+**Not yet proven.** These 45 were all claims the old judge had flagged, so this shows the new judge drops false alarms — not that it catches fabrications the old judge let through. That needs the full batch re-run.
 
 ## Known limitations (not yet fixed)
 

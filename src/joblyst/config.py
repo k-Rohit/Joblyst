@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     fab_bullet_ratio: float = Field(default=0.65)  # min similarity a rewritten CV bullet must keep vs its cited corpus item
     fab_skill_ratio: float = Field(default=0.85)  # min similarity a claimed skill must have vs the corpus's real skill vocabulary
     fab_letter_ratio: float = Field(default=0.55)  # min similarity a cover-letter sentence must have vs corpus/research/job-context text
+    # The fabrication judge. Deliberately stronger than the tailoring model: a judge
+    # no better than the writer it grades tends to share the writer's blind spots.
+    joblyst_judge_model: str = Field(default="openai:gpt-4.1", alias="JOBLYST_JUDGE_MODEL")
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
 

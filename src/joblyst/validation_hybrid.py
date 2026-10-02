@@ -46,7 +46,8 @@ from joblyst.validation import (
     check_skills,
 )
 
-LLM_JUDGE_MODEL = "openai:gpt-4o-mini"
+JUDGE_MAX_CONCURRENCY = 3
+JUDGE_MAX_ATTEMPTS = 8
 
 # How many of the closest real sources to hand the judge for a claim grounded
 # by search (summary, cover letter) rather than by an explicit corpus_ref.
@@ -79,12 +80,20 @@ def _run_drift_checks(survivors: list[_Survivor]) -> list[FlaggedClaim]:
     if not survivors:
         return []
 
-    model = get_chat_model(LLM_JUDGE_MODEL, temperature=0.0).with_structured_output(_DriftCheck)
+    # The judge model has a low tokens-per-minute limit (gpt-4.1: 30k on this
+    # account) and each few-shot judge call is ~640 tokens, so firing every claim
+    # at once returns 429 — and since this runs inside the graph, an unhandled 429
+    # fails the whole tailoring run. Cap the parallelism and retry with backoff.
+    model = (
+        get_chat_model(get_settings().joblyst_judge_model, temperature=0.0)
+        .with_structured_output(_DriftCheck)
+        .with_retry(stop_after_attempt=JUDGE_MAX_ATTEMPTS, wait_exponential_jitter=True)
+    )
     prompts = [
         DRIFT_CHECK_PROMPT.format(rewrite=s.text, sources="\n".join(f"- {src}" for src in s.sources))
         for s in survivors
     ]
-    results: list[_DriftCheck] = model.batch(prompts)  # type: ignore[assignment]
+    results: list[_DriftCheck] = model.batch(prompts, config={"max_concurrency": JUDGE_MAX_CONCURRENCY})  # type: ignore[assignment]
 
     return [
         FlaggedClaim(
