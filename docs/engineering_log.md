@@ -624,7 +624,21 @@ Pattern worth noting: every real fabrication is unsupported *qualitative* paddin
 
 **Trade-off, accepted deliberately.** Fabrication checking went from ~1.6s (gpt-4o-mini, unlimited parallelism, measured over 16 runs) to slower — a bigger model per call, and capped parallelism. Judged acceptable: tailoring is a one-off action the user already waits ~14s for, and a check that flags 39% of lines trains users to ignore it, which hides the 2% that matter.
 
-**Not yet proven.** These 45 were all claims the old judge had flagged, so this shows the new judge drops false alarms — not that it catches fabrications the old judge let through. That needs the full batch re-run.
+**Full batch re-run (14 cases, 383 claims), new judge.** It only half-worked:
+
+| | before | after |
+|---|---|---|
+| LLM-judge flags | 45 | **16** |
+| deterministic flags | 99 | 74 |
+| fabrication rate | 0.388 | **0.235** |
+
+The judge is fixed: of its 16 flags, 14 are genuine qualitative padding and 2 come from the one corpus split still left (a wrapped line starting with a capital — `...conversation threads with` / `PostgreSQL checkpointing...`). But the 45-claim re-judge only ever measured stage 2. The deterministic stage was never changed and now produces 74 of the 90 flags, still on honest summaries (e.g. a churn-model bullet reworded at similarity 0.645). Real rate by reading every LLM flag: about 14 / 383 = **3.7%**. Next step: stop the deterministic stage judging prose and keep it for skills only.
+
+A counting mistake of my own, recorded so it is not repeated: a keyword search for omission language reported 9 of the 16 as omission flags. It was matching "the source does not mention", which the judge uses to explain an *added* phrase. Reading them, none were omissions.
+
+**Latency and cost, measured.** Median fabrication-check time per CV went from **1.7s to 4.1s** (max 5.4s, 14 runs) — far less than the 10-20s estimated beforehand. The whole 14-case batch went from **$0.065 to $0.29**, and almost all of the rise is the judge: gpt-4.1 $0.245 (85%), the tailoring writer gpt-4o-mini $0.012 (4%), search and ranking $0.033 (11%). Checking a CV now costs about 21x what writing it does, though still under 2 cents. No rate-limit failures; no crashes.
+
+A measurement error corrected here: costs reported earlier for these batches ($0.11 old, $0.32 new) were wrong. Opik's `tags contains "tailor-batch"` filter matches substrings, so it also picked up every `tailor-batch-search` trace and counted the search cost twice. The same thing explained the "twice as many traces as runs" oddity, which I had wrongly guessed was the judge opening its own traces. Grouping by the exact tag set gives the figures above.
 
 ## Known limitations (not yet fixed)
 

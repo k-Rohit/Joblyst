@@ -62,10 +62,10 @@ This is the part I'd want someone to read. Joblyst worked end to end long before
 | **Ranking** — is the fit score on the right side of 60? | 46 hand-labelled jobs, deterministic check | 0.870 | **0.891** |
 | **Ranking** — are "matched skills" real? | same 46, exact lookup | 0.978 | **0.978** |
 | **Profile extraction** — field accuracy | 5 hand-verified CVs, deterministic | 0.569 | **0.738** ¹ |
-| **Fabrication** — share of generated claims flagged | 14-case tailoring batch, LLM judge | 0.388 | **⟪RATE⟫** |
+| **Fabrication** — share of generated claims flagged | 14-case tailoring batch | 0.388 | **0.235** ² |
 | **Routing + query guards** | unit tests, no LLM | — | **28 passing**, 0.2s |
 
-<sub>¹ Partly arithmetic — two fields that a CV cannot answer were moved out of extraction entirely. The real gain is in one field; see chapter 4.</sub>
+<sub>¹ Partly arithmetic — two fields that a CV cannot answer were moved out of extraction entirely. The real gain is in one field; see chapter 4.<br>² Of the 90 remaining flags, 74 come from the cheap similarity stage and are mostly honest summaries. The real rate, by reading every LLM flag, is about <b>3.7%</b>. See chapter 6.</sub>
 
 Every number above came out of a story that looked like this: *the app seemed fine → a measurement disagreed → I read the raw outputs → found the real cause → changed one thing → measured again → kept it or reverted it.* The full record, with every symptom, cause, fix and result, is in [`docs/engineering_log.md`](docs/engineering_log.md).
 
@@ -196,7 +196,7 @@ Nothing invented. All 99 flags from this stage were on prose, and every one I re
 
 **3. The CV parser split a sentence in half** — `"...at a p99 latency of"` / `"45ms."` — because a line starting with a digit wasn't treated as a continuation. So the judge was correctly told "45ms" wasn't in the source it was shown.
 
-**The fix.** Repaired the parser; gave the judge one simple rule — *flag only what a rewrite says that the CV doesn't; leaving things out is always fine* — with eight worked examples from unrelated domains (so a re-run can't pass by memorising the real claims); and made the judge a **stronger model than the one writing the CV**, since a judge no better than the writer shares its blind spots.
+**The fix — for two of the three.** Repaired the parser; gave the judge one simple rule — *flag only what a rewrite says that the CV doesn't; leaving things out is always fine* — with eight worked examples from unrelated domains (so a re-run can't pass by memorising the real claims); and made the judge a **stronger model than the one writing the CV**, since a judge no better than the writer shares its blind spots.
 
 **Measured on the same 45 claims, only the judge changing:**
 
@@ -217,9 +217,36 @@ All 7 survivors are real, and each quotes the invented phrase:
 
 **The pattern is the useful part:** every real fabrication is vague, flattering padding on the career-changer's teaching bullets. None invented a tool or changed a number. That tells me exactly where the tailoring prompt is weak.
 
-**Full batch re-run with the new judge: ⟪RATE_LINE⟫**
+**Then the full batch, re-run — and it only half-worked.**
 
-**The trade-off, accepted deliberately.** The stronger judge is slower and costs more, and this account's rate limit (30,000 tokens a minute) meant capping it to 3 calls at once with retries — without that, a rate-limit error inside the graph would fail the whole tailoring run. The check went from ⟪CHECK_TIME_LINE⟫. Worth it: tailoring is a one-off action a user already waits ~14 seconds for, and a checker that flags 39% of lines teaches people to ignore it — which hides the 2% that are real.
+| | before | after |
+|---|---|---|
+| LLM-judge flags | 45 | **16** |
+| similarity-stage flags | 99 | 74 |
+| fabrication rate | 0.388 | **0.235** |
+
+The judge was fixed: of its 16 flags, **14 are real** (all the same kind of qualitative padding — *"providing insights that drove strategic decisions"*, *"demonstrating strong analytical skills"*), and the other 2 come from one sentence the parser still splits. But the rate only fell to 23.5%, because the re-judge test had only ever measured stage 2. **The cheap similarity stage — cause 1 — I hadn't touched**, and it now produces 74 of the 90 flags, still flagging honest summaries:
+
+```
+real CV : Built a churn prediction model in scikit-learn that improved retention
+          campaign targeting by 12% and is now retrained monthly on 1.2M records.
+rewrite : Developed a churn prediction model in scikit-learn, enhancing retention
+          campaign targeting by 12%.                   -> similarity 0.645, FLAGGED
+```
+
+So the honest number is about **14 real fabrications in 383 claims — 3.7%** — and the next step is clear: stop the similarity stage from judging prose, and keep it only for skills, where exact matching is the right tool.
+
+A mistake of my own worth noting: when counting how many judge flags were "about omission", my keyword search matched *"the source does not mention"* — which the judge uses to explain an **added** phrase. Reading them, none were omissions. Counting by keyword is not the same as reading.
+
+**The trade-off, accepted deliberately.** The stronger judge is slower and costs more, and this account's rate limit (30,000 tokens a minute) meant capping it to 3 calls at once with retries — without that, a rate-limit error inside the graph would fail the whole tailoring run. Measured over the real runs, the check went from a median of **1.7s to 4.1s** per CV (max 5.4s) — far less than the 10–20s I'd estimated — and the 14-case batch went from **$0.065 to $0.29**. Almost all of that is the judge:
+
+| | model | cost (14 cases) | share |
+|---|---|---|---|
+| fabrication judge | gpt-4.1 | $0.245 | 85% |
+| writing the CV | gpt-4o-mini | $0.012 | 4% |
+| search + ranking | gpt-4o-mini, gpt-4.1-nano | $0.033 | 11% |
+
+Checking a tailored CV now costs about **21 times** what writing it does — still under 2 cents per CV. Worth it: tailoring is a one-off action a user already waits ~14 seconds for, and a checker that flags 39% of lines teaches people to ignore it — which hides the 2% that are real.
 
 ### Chapter 7 — What I tried and didn't keep
 
@@ -250,7 +277,10 @@ One honest note on the metric itself: `gpt-5-mini` lost points on `skills` partl
 - The career-changer label — `None` or `2` years of data experience — is a judgment call the extractor can't settle.
 - `primary_roles` has a contradiction I introduced by accident: "extract only what the CV states" vs "include the natural next step".
 - The search step can still repeat the same query twice, and the LLM budget guard counts one call where it authorises several searches.
+- The judge is now **85% of the batch's cost**. Worth testing a cheaper judge (`gpt-4.1-mini`) or shorter worked examples, measured against the same 45 claims.
+- The **similarity stage still judges prose** and produces 74 of 90 fabrication flags, mostly false. Next: restrict it to skills.
 - Fabrication-judge **recall** is unmeasured: I've confirmed it stops false alarms, not that it catches everything.
+- One sentence in my real CV still splits across two corpus items (a wrapped line starting with a capital), and the source PDF contains leftover template text (`...redesign.ement bullet point here.`).
 - Adzuna's 500-character descriptions are a hard limit of free data.
 
 ---
@@ -268,7 +298,7 @@ uv run python -m evals.run_evals --suite ranking --yes
 uv run python -m evals.run_evals --suite extraction --yes
 uv run python -m evals.run_evals --suite extraction --yes --model openai:gpt-5-mini
 
-# search + tailor 14 cases and report the fabrication rate (~$0.15)
+# search + tailor 14 cases and report the fabrication rate (~$0.30)
 uv run python scripts/run_tailor_batch.py --yes
 ```
 
