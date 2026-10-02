@@ -46,14 +46,25 @@ COST_PER_RUN_ESTIMATE = 0.01
 
 # 6 plain runs (one per CV, including the real resume) plus one deliberately
 # hard case: the real resume pivoting toward AI engineering roles.
+#
+# locations/remote_ok are stated here, not extracted: they are candidate
+# preferences the CV cannot answer (the app asks the user for them), so for a
+# synthetic persona the batch has to stand in for that user.
 CASES: list[dict] = [
-    {"case_id": "junior_ds_in|plain", "cv": "junior_ds_in.pdf", "target_role": None},
-    {"case_id": "senior_mle_in|plain", "cv": "senior_mle_in.pdf", "target_role": None},
-    {"case_id": "career_changer_in|plain", "cv": "career_changer_in.pdf", "target_role": None},
-    {"case_id": "lead_in_remote|plain", "cv": "lead_in_remote.pdf", "target_role": None},
-    {"case_id": "mid_analyst_in|plain", "cv": "mid_analyst_in.pdf", "target_role": None},
-    {"case_id": "data_engineer|plain", "cv": "data_engineer.pdf", "target_role": None},
-    {"case_id": "data_engineer|ai_engineer_pivot", "cv": "data_engineer.pdf", "target_role": "AI Engineer"},
+    {"case_id": "junior_ds_in|plain", "cv": "junior_ds_in.pdf", "target_role": None,
+     "locations": ["Bengaluru, India"], "remote_ok": False},
+    {"case_id": "senior_mle_in|plain", "cv": "senior_mle_in.pdf", "target_role": None,
+     "locations": ["Hyderabad, India"], "remote_ok": False},
+    {"case_id": "career_changer_in|plain", "cv": "career_changer_in.pdf", "target_role": None,
+     "locations": ["Bengaluru, India"], "remote_ok": True},
+    {"case_id": "lead_in_remote|plain", "cv": "lead_in_remote.pdf", "target_role": None,
+     "locations": ["Pune, India"], "remote_ok": True},
+    {"case_id": "mid_analyst_in|plain", "cv": "mid_analyst_in.pdf", "target_role": None,
+     "locations": ["Gurugram, India"], "remote_ok": False},
+    {"case_id": "data_engineer|plain", "cv": "data_engineer.pdf", "target_role": None,
+     "locations": ["Pune, Maharashtra"], "remote_ok": False},
+    {"case_id": "data_engineer|ai_engineer_pivot", "cv": "data_engineer.pdf", "target_role": "AI Engineer",
+     "locations": ["Pune, Maharashtra"], "remote_ok": False},
 ]
 
 
@@ -90,6 +101,10 @@ def _load_cvs_and_profiles(cv_dir: Path, cache_path: Path) -> tuple[dict[str, st
 
 def _run_case(case: dict, profile: Profile, cv_text: str) -> dict:
     """Run one case through the real search graph and shape it into a report row."""
+    # Stand in for the user's own preference inputs (see CASES above).
+    profile = profile.model_copy(
+        update={"locations": case["locations"], "remote_ok": case["remote_ok"]}
+    )
     result = run_search(
         profile,
         cv_text,

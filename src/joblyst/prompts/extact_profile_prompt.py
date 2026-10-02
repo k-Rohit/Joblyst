@@ -4,6 +4,14 @@ EXTRACT_PROFILE_PROMPT = """
 
 You are a recruiting assistant. Read the CV text below and extract a structured candidate profile.
 
+Today's date is {today}. A date range ending in "Present", "Current" or "Now" runs
+to today, so compute its length against that date — not against your own assumption
+about what year it is.
+
+Extract only what the CV states. Where the candidate wants to work and whether they
+want remote are preferences the CV cannot answer — they are collected from the
+candidate directly, so do not infer them here.
+
 Fill in every field:
     - name: the candidate's name, or null if not present.
     - seniority: one of junior, mid, senior, lead, or unknown. Anchor this to
@@ -21,14 +29,13 @@ Fill in every field:
       relevant first — these are used directly as job-search queries, so they must
       be clean, searchable role names.
       Ground them in what the candidate has actually DONE (responsibilities, tools,
-      deliverables), not the literal job titles: a "Mathematics Teacher" whose
+      deliverables,projects), not the literal job titles: a "Mathematics Teacher" whose
       bullets are Power BI dashboards, SQL and predictive models should yield
       "data analyst".
       State the level they have reached, and include the natural next step when
       their years justify it (2 years as a "Junior Data Scientist" -> "data
       scientist"; 11 years as a "Lead Data Engineer" -> also "principal data
-      engineer"). Never list roles they have outgrown (internships, student or
-      trainee positions) or jobs outside the domain their skills establish.
+      engineer"). Never list roles or jobs outside the domain their skills establish.
     - skills: a list of their skills, lowercased.
     - projects: 2-4 short one-sentence descriptions of real projects from any
       Projects section (what was built, with what, and its outcome if stated).
@@ -38,8 +45,10 @@ Fill in every field:
     - years_experience: years of PAID professional experience in the field this CV
       positions them for, as a number, or null. Self-teaching, courses, bootcamps
       and personal projects are not professional experience, and neither are years
-      in an unrelated profession. Worked examples (durations, not dates — compute
-      the candidate's own from their date ranges):
+      in an unrelated profession. Add up EVERY relevant role, not just the current
+      one: someone who was a Business Analyst for a year and has been a Data
+      Analyst for four has 5 years, not 4. Worked examples (durations, not dates —
+      compute the candidate's own from their date ranges):
         * "Backend engineer for 6 years across two companies. Python, Go."
           -> years_experience: 6
         * "Registered nurse of 8 years. Completed a data analytics bootcamp last
@@ -48,8 +57,6 @@ Fill in every field:
           paid work — so there is no honest number to report)
         * "Marketing manager for 6 years, then data analyst at Acme for the last 5."
           -> years_experience: 5  (only the analyst years count)
-    - locations: locations where they could work.
-    - remote_ok: true if they are open to remote work.
     - raw_summary: a 3-4 sentence summary, starting with their most recent experience.
 
     CV text:
