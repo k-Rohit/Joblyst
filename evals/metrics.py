@@ -41,13 +41,11 @@ class SkillsInProfile(base_metric.BaseMetric):
 
 SCORED_FIELDS = (
     "seniority",
-    "remote_ok",
     "years_experience",
     "primary_roles",
     "skills",
-    "locations",
 )
-LIST_FIELDS = {"primary_roles", "skills", "locations"}
+LIST_FIELDS = {"primary_roles", "skills"}
 YEARS_TOLERANCE = 0.5  # extraction reads years off a CV; treat rounding as correct
 
 
@@ -82,6 +80,10 @@ def _field_score(field: str, expected: object, actual: object) -> float:
 
 class ProfileFieldAccuracy(base_metric.BaseMetric):
     """Per-field accuracy of extract_profile against a human-verified expected Profile.
+
+    ``locations`` and ``remote_ok`` are not scored either: they are candidate
+    preferences, not facts in the document, so the CV has no right answer to
+    grade against. They come from the user now (see app.py).
 
     ``projects`` is deliberately not scored — free text with no clean scoring
     function, and a known bug (see engineering_log.md) means the extractor
