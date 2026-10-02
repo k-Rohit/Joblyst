@@ -153,7 +153,11 @@ def _logical_lines(cv_text: str) -> list[str]:
             # Two lone words in a row are a one-per-line list ("Python" then
             # "dbt"), not a wrapped sentence — joining them invents a skill.
             and not (len(prev.split()) == 1 and len(line.split()) == 1)
-            and (prev.endswith(",") or line[:1].islower())
+            # A digit opens a continuation as readily as a lowercase letter:
+            # "...at a p99 latency of" / "45ms." was splitting into two items,
+            # so no single item held the whole fact and the fabrication
+            # validator reported a real number as unsupported.
+            and (prev.endswith(",") or line[:1].islower() or line[:1].isdigit())
         ):
             lines[-1] = f"{prev} {line}"
         else:
