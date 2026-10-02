@@ -512,6 +512,86 @@ Accepted tradeoff: a title legitimately containing "and" gets split (`'machine l
 
 **What the fix surfaced, left unfixed by decision.** The model stopped packing roles into one `OR` query and started splitting them across separate tool calls — 2 or 3 instead of the 1 the prompt asks for, in 6 of 7 cases, stable across 5 runs at temperature 0. The multi-tool-call handling merges them correctly, so this works, but: fan-out is uncapped while `MERGED_CEILING=25` and `joblyst_max_jobs=10` mean a 3rd call's jobs are largely truncated; identical `(query, country, remote)` tuples are not deduped (`career_changer` fires `'data analyst'` twice); one pivot-case call chose `country='gb'` for a Pune candidate; and `ensure_budget` counts only the 1 LLM call, not the N search requests it authorises — which matters because Jooble's quota is 500 requests for the lifetime of the key.
 
+## 2026-10-02 · The extractor counted 11 years of teaching as 11 years of data work
+
+**Symptom.** The extraction eval scored `career_changer_in.pdf` 0.00 on two fields: `years_experience` expected `None`, got `11.0`; `seniority` expected `junior`, got `mid`. Her CV opens "Secondary school mathematics teacher of 11 years moving into data analytics ... Seeking an entry level analyst role".
+
+**Root cause.** The prompt asked for "total years of professional experience", which is literally what the model gave — 11 years of professional teaching. The field is *consumed* as relevant experience but was *documented* as total experience.
+
+**Why it mattered more than a wrong field.** `years_experience` feeds the ranking prompt's experience-gap rule ("when a posting states a minimum years of experience well above the candidate's Years experience, that is a hard gap, score below 60"). Fed `11`, the rule inverts: it starts *confirming* that senior postings fit. The real consequence is in the ranking dataset — Business Data Analyst at VOLTO Consulting, a posting requiring "8-12 Years", scored **60** for her with the explanation "the role requires 8-12 years of experience, which is at the upper limit of her experience". 60 clears `GOOD_FIT_THRESHOLD`, so that job would have been recommended. It is one of the 6 items the human labelled `No` in the ranking review. One extraction bug, surfacing as a failure in two separate evals — and the ranking eval could not have diagnosed it, because scoring an 11-year candidate against an 8-12 year role at 60 is correct reasoning on bad input.
+
+**Fix.** Rewrote the field as "years of PAID professional experience in the field this CV positions them for", with three worked examples. Self-teaching, courses, bootcamps and personal projects are explicitly excluded, as are years in an unrelated profession. Durations are used in the examples rather than date ranges, so the examples cannot go stale.
+
+**Result.** `11.0` -> `2.0`. **By the metric this is a regression** (overall 0.697 -> 0.656) because the label expects `None` and both numbers score 0.00 — and `remote_ok` flipped on one CV at the same time, for reasons I could not pin down. It was kept anyway, deliberately: the metric is binary, so it cannot see that the downstream harm is largely gone. At `2.0` the VOLTO "8-12 years" posting now reads as a genuine gap instead of a satisfied requirement.
+
+Still open, and probably a label question rather than a prompt one: two different models (gpt-4o-mini and gpt-5-mini) and three prompt versions all independently answer `2.0`, reading "self taught ... over the past two years" as two years of experience. `None` is defensible (no *paid* data work) but so is `2.0`. The yaml comment always said the human owns this call.
+
+Also tried and rejected: `gpt-5-mini` on the same prompt and dataset scored **0.553 vs 0.656** and ran 4.5x slower (p50 3.9s -> 17.5s). It fixed `remote_ok` (0.40 -> 0.80) but collapsed `primary_roles` (0.62 -> 0.13) by emitting unsearchable variants like `data analyst (mid)` and `analytics engineer / dbt developer` — and those strings go straight into the job-search query. Its `skills` drop is partly the metric's fault, not the model's: it correctly added `flask` and `streamlit`, which are in the CV but missing from the label, and set-F1 punishes extra items.
+
+## 2026-10-02 · locations and remote_ok were being guessed from CVs that cannot answer them
+
+**Symptom.** `remote_ok` never scored above 0.600 and `locations` never above 0.800 in any extraction run. The failures made no sense as extraction errors: `junior_ds_in` says "Open to hybrid" (is that remote or not?), `senior_mle_in` says nothing at all about remote, and `lead_in_remote` lists four cities that are past offices, not places the candidate wants to work.
+
+**Root cause.** These two fields are **preferences, not facts**. A CV records where someone has worked and sometimes where they live; it cannot say where they are willing to work or whether they want remote. The model was being graded on a question the document does not contain, so there was no right answer to converge on.
+
+**Fix.** Stopped extracting both. The extraction prompt now says so explicitly. The Streamlit app asks the user instead ("Where do you want to work?" plus an "Open to remote roles" checkbox) and overrides the profile with `model_copy` before calling `run_search` — so `fetch_jobs` and `rank_jobs` keep reading `profile.locations` / `profile.remote_ok` with no signature changes anywhere in the graph. `run_batch.py`'s 7 cases now state both values explicitly, standing in for the user that a synthetic persona does not have. Both fields came out of `SCORED_FIELDS` and out of all 5 labels. `target_role` was the existing precedent for a user-supplied value overriding what the CV implies.
+
+**Result.** Overall 0.656 -> 0.738, but **most of that is arithmetic**: dropping the two worst-scoring fields raises the mean on its own, the same way removing `languages` did. The scored set is now the four fields a CV can actually answer: seniority, years_experience, primary_roles, skills.
+
+The real gain was accidental and elsewhere. `primary_roles` went **0.620 -> 0.770** because invented roles stopped appearing: `data architect`, `ml platform lead` and `ml ops engineer` all vanished, replaced by roles the candidate actually held. The cause is almost certainly a sentence added while scoping the two fields — "Extract only what the CV states ... do not infer" — which is unqualified and which the model generalised to every field.
+
+That leaves a contradiction introduced by accident: the header now says "extract only what the CV states" while the `primary_roles` bullet still says "include the natural next step when their years justify it". The model is siding with the header, which improves precision but caps recall — the labels for `lead_in_remote` and `mid_analyst` deliberately include next-step roles (`principal data engineer`, `senior analyst`) that appear nowhere in those CVs, so full marks are now unreachable. Needs resolving on purpose, in one direction or the other.
+
+## 2026-10-02 · The model's clock is frozen at its training cutoff, so "2022 - Present" was 3 years short
+
+**Symptom.** `mid_analyst_in.pdf` scored 0.00 on `years_experience` in every single run: expected `4.0`, got `2.0`. Nothing moved it — not the field rewrite, not the worked examples, not switching to gpt-5-mini.
+
+**Root cause.** Asked directly, gpt-4o-mini answers "Today's date is October 4, 2023" — its training cutoff. The extraction prompt never told it otherwise, so every date range ending in "Present" was computed against **2023**. "Data Analyst (2022 - Present)" came out as ~1-2 years instead of 4.
+
+Four of the five fixture CVs hid this, because they state their experience in prose ("Data scientist with 2 years of experience...", "...with 8 years...", "...with 11 years..."), so the model just copied the number. `mid_analyst` is the only fixture with no such line, which is why it was the only one failing — and why a bug affecting **every production CV with a current job** showed up as a single stubborn fixture.
+
+**Fix.** `extract_profile` now passes `datetime.now(UTC).date().isoformat()` into the prompt, which states that ranges ending in "Present", "Current" or "Now" run to that date. Reading from the system clock means it cannot go stale — the same failure mode that had made my own worked examples wrong (a hardcoded "2019 to present -> 6 years" that was 7 by the time I wrote it).
+
+**Result.** `2.0` -> `4.0`. The date bug is fixed and verified.
+
+**What it uncovered, still open.** 4.0 is the *current role only*. The honest total is 5 — Business Analyst (2021-2022) plus Data Analyst (2022-present), with the Analytics Intern year excluded for consistency with how `primary_roles` treats internships — so the label was corrected from 4.0 to 5.0. The model will not sum the roles. Three attempts failed: an explicit "add up EVERY relevant role, not just the current one" instruction, a worked example almost identical to the case itself, and a scratchpad reasoning field in the schema (which made it *worse*, 3.5, and listed the roles without adding them).
+
+The diagnosis is that the arithmetic is the problem, not the reading. Asked the same question free-form with "show each role, its duration, whether you counted it and why", the model answers **5 years** correctly and shows the working. Through `with_structured_output` it will not. It reads date ranges reliably and adds them unreliably.
+
+The principled fix is therefore to move the arithmetic out of the model: have it extract structured role periods (title, start year, end year or null for Present, whether the role is relevant) and compute `years_experience` in Python. Exact, reproducible, unit-testable without an API call, and it makes the "does the internship count" decision explicit instead of hidden inside a number. Deferred — it is a schema change plus every consumer, not a prompt tweak. The general lesson from both bugs in this entry: arithmetic does not belong in the model.
+
+## 2026-10-02 · One LLM call fired 16 job searches, because the reformulated query was a list
+
+**Symptom.** The tailoring batch report showed `"fetch_jobs: LLM issued 10 tool calls (expected 1); running all of them"` — and worse on inspection: `mid_analyst_in` issued **16** tool calls, twice in the same run (once per reformulation round), so roughly 32 searches for one case. It also returned the **fewest** jobs of any case, 10 against 25 for cases that issued 2 calls. More searching, less found.
+
+**Root cause.** `reformulate_query`'s prompt said only "Try synonyms, adjacent job titles, or a less specific query so more jobs come back" — no constraint on shape or length, unlike the fetch prompt which demands one title of two to four words. So it generated this:
+
+    'Data Analyst OR Business Analyst OR Analytics OR Data Scientist OR Data
+     Specialist OR Reporting Analyst OR SQL OR Excel OR Looker OR Python OR DBT
+     OR Snowflake OR Tableau OR Google Analytics OR Data Modeling OR Stakeholder
+     Reporting'
+
+16 OR-separated terms. That string lands in `state["search_query"]`, `fetch_jobs` puts it into its prompt verbatim as "Use this broader query and search again: ...", and the fetch model obediently issues **one tool call per term** — including for `SQL`, `Excel`, `Python` and `Snowflake`, which are skills, not job titles, and which boards match against titles and so return nothing.
+
+Two things made it invisible. First, it only happens on a reformulation, so the first pass looks fine (verified: 1 tool call on the first pass, 16 on the reformulated one with the same profile). Second, the `_trim_query` guard added earlier the same day only cleans the query the *fetch* model returns per tool call — the reformulated query reaches the prompt as guidance **untrimmed**, bypassing it entirely. The same path is where the earlier `'Data Analyst OR Business Analyst OR'` search query came from.
+
+And it is self-defeating: "broader" was implemented as *more terms*, but a list matches no posting at all, so the broadened query is strictly narrower than the single title it replaced. That is why the case with the most searches found the fewest jobs.
+
+**Fix.** Two layers, matching the fetch path.
+1. `REFORMULATE_PROMPT` now states the same contract: one job title someone would actually post, two to four words, reach for an adjacent or more general TITLE rather than more terms (`'senior data analyst' -> 'data analyst' -> 'business intelligence analyst'`), with worked bad examples. It says explicitly that a list is narrower than a single title, not broader.
+2. `reformulate_query` runs its output through `_trim_query` before storing it, and records what was dropped in `errors`. A prompt is a request; this makes it a guarantee.
+
+**Result.** Measured directly against the fetch model with the same profile:
+
+| guidance query | tool calls |
+|---|---|
+| the 16-term OR list (before) | **16** |
+| `'Business Intelligence Analyst'` (after) | **2** |
+
+And the reformulation output itself is now a single searchable title every time: `mid_analyst` `'Data Analyst'` -> `'Business Intelligence Analyst'`, `junior_ds` `'data scientist'` -> `'data analyst'`, `career_changer` `'data analyst'` -> `'business intelligence analyst'`. The prompt change alone was enough — `_trim_query` did not have to intervene on any of the three, so it is now a backstop rather than the mechanism. Pinned by two tests in `tests/test_fetch_query.py`.
+
+Still open, deliberately: the remaining 2 calls are the **same query twice**, which is pure waste. Deduping identical `(query, country, remote)` tuples before searching would fix it, and `ensure_budget` still counts only the 1 LLM call rather than the N search requests it authorises — which matters because Jooble's quota is 500 requests for the lifetime of the key.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

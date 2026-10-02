@@ -78,3 +78,25 @@ class TestFallbackQuery:
         # Empty is correct here: run_search's caller decides what to do, and an
         # invented query would search for something the candidate never claimed.
         assert _fallback_query(Profile()) == ""
+
+
+class TestReformulatedQueryIsTrimmed:
+    """The reformulate node must not hand fetch_jobs a list.
+
+    fetch_jobs puts ``search_query`` into its prompt verbatim as guidance, and the
+    model then issues one tool call per term in it — a 16-term OR list became 16
+    searches in one run. The node now applies the same guard as the fetch path.
+    """
+
+    def test_reformulated_list_is_cut_to_one_title(self):
+        # Verbatim from reformulate_query before the prompt was constrained.
+        raw = (
+            "Data Analyst OR Business Analyst OR Analytics OR Data Scientist OR "
+            "Data Specialist OR Reporting Analyst OR SQL OR Excel OR Looker OR Python"
+        )
+        kept, dropped = _trim_query(raw)
+        assert kept == "Data Analyst"
+        assert dropped  # the rest is recorded, not silently discarded
+
+    def test_a_clean_reformulation_passes_through(self):
+        assert _trim_query("business intelligence analyst") == ("business intelligence analyst", "")
