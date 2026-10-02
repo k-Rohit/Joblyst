@@ -6,7 +6,9 @@
 # real PDF and flips it to true. An entry only enters the eval dataset once
 # verified: true. Fields mirror joblyst.schemas.schemas.Profile; only the
 # fields ProfileFieldAccuracy actually scores are listed here (seniority,
-# remote_ok, years_experience, locations, primary_roles, skills).
+# years_experience, primary_roles, skills). locations and remote_ok are no
+# longer extracted at all — they are candidate preferences, collected from the
+# user, so a CV has no right answer to grade against.
 # `name` is kept for readability only — it isn't scored.
 #
 # `projects` is listed too but NOT currently scored by any metric (it's free
@@ -43,12 +45,6 @@
       - experimental design
       - regression analysis
     years_experience: 2.0
-    locations:
-      - Bengaluru, India
-    # AMBIGUOUS: contact line says "Open to hybrid", not "remote". Hybrid is
-    # not the same claim as remote_ok — decide how the extractor should treat
-    # this, then check what it actually did.
-    remote_ok: false
     # Has a real PROJECTS section — these should come through.
     projects:
       - "Transit Delay Predictor: trained a gradient boosting model on two years of public transit data to predict bus arrival delays, deployed as a small Flask API."
@@ -89,9 +85,6 @@
     # senior/lead boundary (5-8 -> senior, 8+ -> lead) in the extraction
     # prompt's own anchors, so it's worth checking which way the model reads it.
     years_experience: 8.0
-    locations:
-      - Hyderabad, India
-    remote_ok: false
     # No Projects section anywhere in this CV -> this is the regression check.
     projects: []
 
@@ -118,9 +111,6 @@
     # doesn't have one honest number for a career changer. Decide what the
     # extractor SHOULD report before scoring it against either number.
     years_experience: null
-    locations:
-      - Bengaluru, India
-    remote_ok: true
     # This CV is deliberately projects-heavy (career-changer pivot evidence).
     projects:
       - "Student Performance Dashboard: built a Power BI dashboard tracking results for 600 students across 4 academic years, adopted by the school leadership team."
@@ -155,11 +145,8 @@
       - great expectations
       - postgresql
     years_experience: 11.0
-    locations:
-      - Pune, India
     # Contact line explicitly says "Open to remote only" — this one isn't
     # ambiguous like Ananya's; a false here would be a real extraction miss.
-    remote_ok: true
     # No Projects section (has LEADERSHIP AND COMMUNITY instead) -> regression check.
     projects: []
 
@@ -183,9 +170,10 @@
       - google analytics
       - data modelling
       - stakeholder reporting
-    years_experience: 4.0
-    locations:
-      - Gurugram, India
-    remote_ok: false
+    # Only CV here with no "X years of experience" line — the number has to be
+    # computed from date ranges. Business Analyst (2021-2022) plus Data Analyst
+    # (2022-present) is 5 years of professional analyst work as of 2026; the
+    # Analytics Intern year is excluded, same as primary_roles excludes it.
+    years_experience: 5.0
     # No Projects section (has ACHIEVEMENTS instead) -> regression check.
     projects: []
