@@ -111,10 +111,20 @@ tab_search, tab_external = st.tabs(["Search", "Paste an external job"])
 # --- Search tab ----------------------------------------------------------
 with tab_search:
     target_role = st.text_input("Target role override (optional — leave blank to use your CV's own history)")
+    # Preferences, not CV facts: a resume says where someone HAS worked, not where
+    # they are willing to. Asked here rather than guessed by extract_profile.
+    where = st.text_input("Where do you want to work? (comma-separated)", placeholder="Pune, India")
+    remote_ok = st.checkbox("Open to remote roles")
     if st.button("Run search", type="primary"):
+        profile = st.session_state.profile.model_copy(
+            update={
+                "locations": [loc.strip() for loc in where.split(",") if loc.strip()],
+                "remote_ok": remote_ok,
+            }
+        )
         with st.spinner("Searching, ranking, reformulating if needed..."):
             st.session_state.search_result = run_search(
-                st.session_state.profile,
+                profile,
                 st.session_state.cv_text,
                 thread_id=st.session_state.thread_id,
                 target_role=target_role or None,
