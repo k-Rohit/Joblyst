@@ -722,3 +722,33 @@ Also noticed while explaining the code, not yet fixed: LangChain's `with_retry` 
   `mid` label and ignored her 11 years). Net change 0.891 to 0.891. The full
   posting cannot be fetched (Adzuna's redirect pages return 403), so this stays
   a data limit of the free API.
+
+### Known fabrication false-flag causes
+
+From reading all 38 flags of the 2026-10-03 batch (about 21 real, about 17 false). Every false flag traced to one of these three causes. None of them is the judge reasoning badly — in each case it is right about what it was given.
+
+1. **`difflib` picks the wrong evidence for uncited prose.** The summary, headline and cover letter have no `corpus_ref`, so `_closest_sources` ranks every CV line by `difflib` similarity and shows the judge the top 3. `difflib` compares characters and divides by total length, so a long CV line saying almost exactly the same thing loses to short, loosely related lines. The proof line ranked #20, #16 and #24 in the three cases tested; embeddings (`text-embedding-3-small`) ranked it #1 in all three. Accounts for most of the ~17 false flags. Fix tested, not wired in — deliberately deferred: a retriever is a new component that can fail on its own, so adopting it means building its own eval first (hand-labelled claim -> proof-line pairs, measured as recall@3). Three examples is a promising test, not a measurement.
+
+2. **The judge does not know which section a claim comes from.** Only the claim text and its source lines go into the prompt; the section label (`summary:sentence:1`, `cover_letter:sentence:3`) stays in Python for the report. Fine for bullets and summaries, where every sentence is a claim about the candidate. Wrong for cover letters, which also state intent toward the job: "...the skills necessary to contribute to the development of a robust Data Validation framework at Mindpool" was flagged as unsupported, because the judge — whose prompt calls everything "a rewritten CV claim" — read intent as an invented fact. Fix: pass the section in, and allow statements of interest or intent about the target job in cover letters.
+
+3. **One CV line still splits across two corpus items.** A wrapped line whose continuation starts with a capital (`...conversation threads with` / `PostgreSQL checkpointing...`) becomes two items — the case `corpus.py`'s docstring leaves alone on purpose. The tailor correctly merges both halves into one bullet but can cite only one id, so the judge, shown half the sentence, flags "PostgreSQL checkpointing". Seen on `data_engineer.pdf` only.
+
+### Known bugs and gaps
+
+**Fabrication check**
+- `with_retry` retries on every exception (LangChain's default `retry_if_exception_type=(Exception,)`), so permanent errors such as a malformed request or a bad API key wait through eight growing back-offs before failing. Should retry only rate-limit, timeout and connection errors.
+- Judge recall is unmeasured. The work so far shows the judge stops false alarms; nobody has checked whether it misses fabrications in the claims it passes.
+- A bullet's `corpus_ref` is trusted. The only check is that the id exists, not that it is the right line, so a wrong citation means the judge compares against the wrong source.
+- Corpus ids are positional. Any change to how the CV is segmented renumbers every id after it (the `45ms` fix moved the feature-store bullet from `cv-bullet-006` to `-005`), which will break a frozen tailoring dataset built before the change.
+- `data/fixture_cvs/data_engineer.pdf` contains leftover template text: "...through the Databricks-based redesign.ement bullet point here." It is part of the grounding corpus.
+
+**Profile extraction**
+- `years_experience` counts only the current role. The model reads date ranges correctly but will not add them up through structured output (three attempted fixes failed). Fix: extract the date ranges and sum them in Python.
+- Career-changer label: `None` or `2` years of data experience. A judgment for the human, not the extractor.
+- `primary_roles` prompt contradicts itself: the header says "extract only what the CV states", the field says "include the natural next step".
+- `senior_mle_in` extracts as `lead` against a `senior` label in every run.
+
+**Search and ranking**
+- `fetch_jobs` can issue the same query twice (dedupe identical `(query, country, remote)` tuples), and `ensure_budget` counts the one LLM call, not the several searches it authorises.
+- One pivot-case run chose `country='gb'` for a Pune candidate.
+- The ranking dataset does not store the job's `remote` flag, so the eval replay always sends `remote=False` (12 of 46 originals were remote).
