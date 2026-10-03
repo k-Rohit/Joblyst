@@ -1,31 +1,26 @@
-"""Two-stage fabrication checker: free deterministic pass, then a scoped LLM pass.
+"""Fabrication checker: exact lookup for skills, an LLM judge for all prose.
 
-Stage 1 is the deterministic difflib check — the same code ``validation.py``
-runs, so the two can never disagree on the part that is supposed to be
-reproducible.
+    skills              deterministic only    a vocabulary lookup — no judgment to make
+    experience bullets  LLM judge             prose, can be honestly reworded
+    project bullets     LLM judge
+    summary             LLM judge
+    cover letter        LLM judge
+    headline            LLM judge
 
-Stage 2 is a narrow LLM drift check that runs ONLY on claims that already
-passed stage 1. Its question is deliberately small: stage 1 has already ruled
-out wholesale invention, so all that's left is a single number, tool, or detail
-swapped inside otherwise-faithful wording — which a similarity score
-structurally cannot see (a 40%->60% edit is one character, scoring ~0.98).
+Prose used to pass a difflib similarity gate first, and anything under the
+threshold was flagged without the judge seeing it. That gate cannot tell
+direction: honest summarisation scores low exactly like invention does. On the
+14-case tailoring batch it produced 74 of 90 flags, nearly all on faithful
+summaries ("...retrained monthly on 1.2M records" shortened away scored 0.645
+and was flagged). So similarity no longer decides anything for prose — it is
+only used to pick which CV lines to show the judge as the source.
 
-What reaches stage 2, and what never does:
+Two checks stay deterministic because they are facts, not judgments: a skill
+either is or is not in the CV's vocabulary, and a bullet either cites a corpus
+item that exists or it does not.
 
-    experience bullets  stage 1 -> stage 2     prose, can be reworded
-    project bullets     stage 1 -> stage 2     prose, can be reworded
-    summary             stage 1 -> stage 2     prose, can be reworded
-    cover letter        stage 1 -> stage 2     prose, can be reworded
-    skills              stage 1 only           a vocabulary lookup, no judgment to make
-    headline            stage 1 only           short and title-like, nothing to hide a detail in
-
-Union-only, by construction: a stage-1 flag returns immediately and never
-reaches stage 2, so a non-deterministic component can never suppress a
-verifiable finding. Stage 2 only ever *adds*.
-
-Stage-2 calls are issued concurrently with ``.batch()`` — one round trip's
-latency for the whole pack instead of one per surviving claim — while staying
-one focused prompt per claim, so per-item attention isn't diluted.
+Judge calls run concurrently (capped — see JUDGE_MAX_CONCURRENCY) with one
+focused prompt per claim.
 """
 
 from __future__ import annotations
@@ -38,8 +33,6 @@ from joblyst.llm import get_chat_model
 from joblyst.prompts.drift_check import DRIFT_CHECK_PROMPT
 from joblyst.schemas.schemas import FabricationReport, FlaggedClaim, TailoringPack
 from joblyst.validation import (
-    _best_pair_ratio,
-    _best_ratio,
     _looks_factual,
     _ratio,
     _split_sentences,
@@ -49,20 +42,21 @@ from joblyst.validation import (
 JUDGE_MAX_CONCURRENCY = 3
 JUDGE_MAX_ATTEMPTS = 8
 
-# How many of the closest real sources to hand the judge for a claim grounded
-# by search (summary, cover letter) rather than by an explicit corpus_ref.
+# How many of the closest real sources to hand the judge for a claim with no
+# corpus_ref (headline, summary, cover letter). Three lets a sentence that
+# combines two CV facts still have both in front of the judge.
 _TOP_SOURCES = 3
 
 
 class _DriftCheck(BaseModel):
-    """Structured-output target for one stage-2 check."""
+    """Structured-output target for one judge call."""
 
     grounded: bool
     reason: str = ""
 
 
 class _Survivor(BaseModel):
-    """A claim that passed stage 1 and still warrants the semantic check."""
+    """A prose claim queued for the judge, with the CV lines it should be compared to."""
 
     where: str
     text: str
@@ -108,17 +102,11 @@ def _run_drift_checks(survivors: list[_Survivor]) -> list[FlaggedClaim]:
     ]
 
 
-def _ground_by_search(text: str, references: list[str], threshold: float) -> float:
-    """Best support for ``text`` anywhere in ``references``, for claims with no corpus_ref.
-
-    Falls back to ``_best_pair_ratio`` because an honest summary or cover-letter
-    sentence often assembles facts from two different corpus lines, and neither
-    one alone would score well.
-    """
-    best = _best_ratio(text, references)
-    if best < threshold:
-        best = max(best, _best_pair_ratio(text, references))
-    return best
+def _closest_sources(text: str, references: list[str]) -> tuple[list[str], float]:
+    """The CV lines most similar to ``text`` — used to choose what the judge sees, not to judge."""
+    ranked = sorted(references, key=lambda ref: _ratio(text, ref), reverse=True)[:_TOP_SOURCES]
+    best = _ratio(text, ranked[0]) if ranked else 0.0
+    return ranked, best
 
 
 def validate_pack_hybrid(
@@ -127,96 +115,73 @@ def validate_pack_hybrid(
     research_notes: str | None = None,
     job_context: list[str] | None = None,
 ) -> FabricationReport:
-    """Deterministic pass over everything; LLM pass only where it earns its cost.
+    """Skills by exact lookup; every prose claim by the LLM judge.
 
     ``job_context`` (e.g. job title and company) and ``research_notes`` join the
-    reference pool for the summary and cover letter, so "I am applying for X at
-    Y" or a researched company fact isn't wrongly flagged as ungrounded.
+    reference pool for the headline, summary and cover letter, so "I am applying
+    for X at Y" or a researched company fact isn't wrongly flagged.
     """
     settings = get_settings()
-    bullet_ratio, skill_ratio, letter_ratio = settings.fab_bullet_ratio, settings.fab_skill_ratio, settings.fab_letter_ratio
+    skill_ratio = settings.fab_skill_ratio
     flagged: list[FlaggedClaim] = []
-    survivors: list[_Survivor] = []
+    queued: list[_Survivor] = []
     claims_checked = 0
 
-    def check_bullet(bullet) -> None:
-        """Stage 1 against the bullet's cited corpus item; queue it if it passes."""
+    def queue_bullet(bullet) -> None:
+        """A bullet is judged against the one corpus item it cites."""
         nonlocal claims_checked
         claims_checked += 1
         where = f"cv_bullet:{bullet.corpus_ref}"
         item = corpus.get(bullet.corpus_ref)
         if item is None:
+            # A citation that points at nothing is a fact, not a judgment call.
             flagged.append(FlaggedClaim(where=where, text=bullet.text, reason="corpus_ref does not resolve to any corpus item"))
             return
-        ratio = _ratio(bullet.text, item.text)
-        if ratio < bullet_ratio:
-            flagged.append(
-                FlaggedClaim(
-                    where=where,
-                    text=bullet.text,
-                    reason=f"rewrite drifted too far from its corpus item (ratio {ratio:.2f} < {bullet_ratio})",
-                    best_match_ratio=round(ratio, 3),
-                )
-            )
-            return
-        survivors.append(_Survivor(where=where, text=bullet.text, sources=[item.text], best_ratio=ratio))
+        queued.append(_Survivor(where=where, text=bullet.text, sources=[item.text], best_ratio=_ratio(bullet.text, item.text)))
 
-    def check_prose(where: str, text: str, references: list[str], threshold: float, *, use_llm: bool) -> None:
-        """Stage 1 by searching all references; queue for stage 2 only if allowed."""
+    def queue_prose(where: str, text: str, references: list[str]) -> None:
+        """Uncited prose is judged against its closest CV lines."""
         nonlocal claims_checked
         claims_checked += 1
-        best = _ground_by_search(text, references, threshold)
-        if best < threshold:
-            flagged.append(
-                FlaggedClaim(
-                    where=where,
-                    text=text,
-                    reason=f"factual claim not traceable to the corpus (best match {best:.2f})",
-                    best_match_ratio=round(best, 3),
-                )
-            )
-            return
-        if use_llm:
-            top = sorted(references, key=lambda ref: _ratio(text, ref), reverse=True)[:_TOP_SOURCES]
-            survivors.append(_Survivor(where=where, text=text, sources=top, best_ratio=best))
+        sources, best = _closest_sources(text, references)
+        queued.append(_Survivor(where=where, text=text, sources=sources, best_ratio=best))
 
-    # 1. Bullets — each cites one corpus item, so stage 1 compares against it directly.
+    # 1. Bullets — each cites one corpus item.
     for entry in pack.cv.experience:
         for bullet in entry.bullets:
-            check_bullet(bullet)
+            queue_bullet(bullet)
     for entry in pack.cv.project:
         for bullet in entry.project_bullets:
-            check_bullet(bullet)
+            queue_bullet(bullet)
 
-    # 2. Skills — deterministic only, shared with validate_pack so the two agree.
+    # 2. Skills — the only deterministic check, shared with validate_pack so the two agree.
     claims_checked += len(pack.cv.skills)
     flagged.extend(check_skills(pack.cv.skills, corpus, skill_ratio))
 
-    # 3. Headline and summary — no corpus_ref, so both ground by searching the
-    #    corpus. Only the summary is prose long enough to hide a swapped detail.
+    # 3. Headline, summary and cover letter — no citation, so compared to the closest CV lines.
     references = [item.text for item in corpus.items] + list(job_context or [])
     if research_notes:
         references.extend(_split_sentences(research_notes))
 
     if pack.cv.headline.strip():
-        check_prose("headline", pack.cv.headline, references, letter_ratio, use_llm=False)
+        queue_prose("headline", pack.cv.headline, references)
     for n, sentence in enumerate(_split_sentences(pack.cv.summary), start=1):
         if _looks_factual(sentence):
-            check_prose(f"summary:sentence:{n}", sentence, references, letter_ratio, use_llm=True)
+            queue_prose(f"summary:sentence:{n}", sentence, references)
 
-    # 4. Cover letter — greeting and sign-off carry no checkable claim.
+    # Greeting and sign-off carry no checkable claim.
     sentences = _split_sentences(pack.cover_letter)
     for n, sentence in enumerate(sentences, start=1):
         if n == 1 or n == len(sentences) or not _looks_factual(sentence):
             continue
-        check_prose(f"cover_letter:sentence:{n}", sentence, references, letter_ratio, use_llm=True)
+        queue_prose(f"cover_letter:sentence:{n}", sentence, references)
 
-    # Stage 2 — every survivor across the whole pack, in one concurrent burst.
-    flagged.extend(_run_drift_checks(survivors))
+    # Every prose claim across the whole pack, judged in one concurrent burst.
+    flagged.extend(_run_drift_checks(queued))
 
     return FabricationReport(
         flags=len(flagged),
         claims_checked=claims_checked,
         flagged=flagged,
-        thresholds={"bullet": bullet_ratio, "skill": skill_ratio, "letter": letter_ratio},
+        thresholds={"skill": skill_ratio},
     )

@@ -608,7 +608,7 @@ The judge was also the same model as the writer it grades (`gpt-4o-mini` for bot
 - `corpus.py`: a line starting with a digit now continues the previous line, like a lowercase one does. `45ms` rejoins its sentence.
 - `drift_check.py`: one stated rule — flag only for something the rewrite *states* that the source does not support; leaving things out is always fine — plus eight worked examples, four grounded (number dropped, `40M -> millions`, count dropped, synonym) and four not (added tool, changed number, invented outcome, inflated role). The examples are synthetic and from other domains, so a re-run cannot pass by memorising the claims it is measured on. The reason must now quote the exact unsupported phrase from the rewrite.
 - The judge model is a setting, `JOBLYST_JUDGE_MODEL`, defaulting to `gpt-4.1` — deliberately stronger than the tailoring model.
-- Judge calls now run at most 3 at a time with retry and backoff. With the worked examples each call is ~640 tokens and this account allows gpt-4.1 30,000 tokens per minute; firing a run's 25-40 claims at once returned HTTP 429, and since validation runs inside the graph an unhandled 429 fails the whole tailoring run.
+- Judge calls now run at most 3 at a time with retry and backoff. Each few-shot call is ~640 tokens and this account allows gpt-4.1 30,000 tokens per minute. (Corrected later: I first wrote that one CV's claims fired at once caused HTTP 429. It did not — the 429 came from a test script judging 45 claims from several CVs at once, ~29k tokens. Measured, one CV needs ~16 judge calls, ~10k tokens.)
 
 **Result.** Re-judged the same 45 claims the old judge had flagged, only the judge changing, with prompt and model separated:
 
@@ -639,6 +639,34 @@ A counting mistake of my own, recorded so it is not repeated: a keyword search f
 **Latency and cost, measured.** Median fabrication-check time per CV went from **1.7s to 4.1s** (max 5.4s, 14 runs) — far less than the 10-20s estimated beforehand. The whole 14-case batch went from **$0.065 to $0.29**, and almost all of the rise is the judge: gpt-4.1 $0.245 (85%), the tailoring writer gpt-4o-mini $0.012 (4%), search and ranking $0.033 (11%). Checking a CV now costs about 21x what writing it does, though still under 2 cents. No rate-limit failures; no crashes.
 
 A measurement error corrected here: costs reported earlier for these batches ($0.11 old, $0.32 new) were wrong. Opik's `tags contains "tailor-batch"` filter matches substrings, so it also picked up every `tailor-batch-search` trace and counted the search cost twice. The same thing explained the "twice as many traces as runs" oddity, which I had wrongly guessed was the judge opening its own traces. Grouping by the exact tag set gives the figures above.
+
+
+## 2026-10-03 · The similarity gate now checks skills only; all prose goes to the judge
+
+**Symptom.** After the judge fix the rate was 0.235, but 74 of the 90 flags came from the deterministic similarity gate, which still ran first on every prose claim and still flagged honest summaries (a churn-model bullet shortened at similarity 0.645).
+
+**Root cause.** The gate measures string similarity, not direction, so shortening looks the same as inventing. It could not be tuned out of this: lowering the threshold would also let through the one-character number changes the judge exists to catch.
+
+**Fix.** `validate_pack_hybrid` no longer applies any similarity threshold to prose. Skills keep the deterministic exact-match check — a vocabulary lookup has no judgment in it. Every bullet, summary sentence, cover-letter sentence and the headline goes to the gpt-4.1 judge. Similarity is still *used*, but only to choose which CV lines to show the judge for prose with no citation. One deterministic check is kept deliberately: a bullet citing a corpus id that does not exist is flagged without an LLM call, because that is a fact, not a judgment.
+
+Considered first and rejected: `gpt-4.1-mini` as a cheaper judge. On the same 45 claims it left 17 flagged against gpt-4.1's 7, and the extra ten were mostly the kinds of change the worked examples call fine ("drastically reducing build time" for "7 hours to 95 minutes", and one near-verbatim copy of its source). It has 6.7x the rate-limit headroom (200k tokens per minute vs 30k), but re-creating the false alarms defeats the point.
+
+**Result.** Full 14-case batch:
+
+| batch | flags | rate | median check time | judge cost |
+|---|---|---|---|---|
+| similarity gate on all prose | 90 / 383 | 0.235 | 4.1s | $0.245 |
+| **similarity gate on skills only** | **38 / 364** | **0.104** | **5.8s** | **$0.413** |
+
+Read by hand, about **21 of the 38 are real** (5.8%): the same qualitative padding, two invented facts about the hiring company in cover letters, and one genuine number distortion — a cover letter saying a model was "successfully flagging 23 students" where the CV says it identified 23 and 19 were correct.
+
+**New weakness surfaced, not fixed.** About 17 of the 38 are false, and most share one cause: for prose with no citation, the judge is shown only the 3 CV lines with the highest `difflib` similarity, and that pick is often wrong. "With over 11 years of experience in data engineering" was flagged as "none of the sources mention the number of years", while the CV opens "Lead data engineer with 11 years of experience" — that line simply was not among the 3 shown. Similarly a headline "specializing in GenAI and Agentic AI" was flagged although "agentic ai" is in the CV's skills. The gate used to hide this by flagging these sentences on similarity before the judge saw them.
+
+Tested a fix, not yet wired in: choose the source lines with embeddings (`text-embedding-3-small`, cosine similarity) instead of `difflib`. For the three wrongly flagged sentences, the CV line that proves each one ranked #20, #16 and #24 by `difflib` and **#1** by embeddings in all three. `difflib`'s score divides by total length, so a long line that says almost the same thing loses to short, loosely related lines — the headline "Junior Data Engineer specializing in GenAI and Agentic AI" is nearly a copy of a CV line that `difflib` ranked 16th of 50.
+
+**Rate limits, measured.** 218 judge calls across the batch, **0 failed** — no 429 at all, so the backoff never fired. One CV averaged 16 judge calls (max 21), ~10k tokens, judged in ~6s; the rest of each case is searching and writing, so any 60-second window holds about one CV's judging, well under the 30k-per-minute limit. The retry is insurance for concurrent users, who share the account-wide budget.
+
+Also noticed while explaining the code, not yet fixed: LangChain's `with_retry` defaults to `retry_if_exception_type=(Exception,)`, so permanent errors such as a malformed request or a bad API key are retried eight times with growing waits before failing. It should retry only on rate-limit, timeout and connection errors.
 
 ## Known limitations (not yet fixed)
 
