@@ -5,6 +5,8 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI, HTTPException, UploadFile
 
 from joblyst.api.schemas import (
+    ExternalJobRequest,
+    ProfileResponse,
     SearchRequest,
     SearchResponse,
     TailorRequest,
@@ -12,7 +14,7 @@ from joblyst.api.schemas import (
 )
 from joblyst.exceptions import CVReadError
 from joblyst.profile import extract_profile
-from joblyst.runner import run_search, run_tailor
+from joblyst.runner import run_external_job, run_search, run_tailor
 from joblyst.tools.cv_reader import extract_cv_content
 
 app = FastAPI()
@@ -26,7 +28,7 @@ def check_status():
     return {"status": "healthy"}
 
 
-@app.post("/api/profile")
+@app.post("/api/profile", response_model=ProfileResponse)
 def upload_profile(file: UploadFile):
     if file.content_type != "application/pdf":
         raise HTTPException(
@@ -50,7 +52,7 @@ def upload_profile(file: UploadFile):
         cv_content, thread_id=str(thread_id), tags=["api", "extract"]
     )
     SESSIONS[thread_id] = {"cv_text": cv_content, "profile": profile}
-    return {"thread_id": thread_id, "profile": profile}
+    return ProfileResponse(thread_id=thread_id, profile=profile)
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -112,6 +114,34 @@ def tailor(req: TailorRequest):
                 500  # e.g. empty corpus — can't happen via this API, so a server bug
             )
         raise HTTPException(status_code=status_code, detail=reason)
+
+    return TailorResponse(
+        thread_id=req.thread_id,
+        pack=result.pack,
+        fabrication_report=result.fabrication_report,  # type: ignore
+    )
+
+
+@app.post("/api/external-job", response_model=TailorResponse)
+def external(req: ExternalJobRequest):
+    session = SESSIONS.get(req.thread_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown thread_id {req.thread_id}. Upload a CV first.",
+        )
+    result = run_external_job(
+        session["profile"],
+        session["cv_text"],
+        thread_id=str(req.thread_id),
+        external_job_text=req.job_desc,
+    )
+
+    if not result.pack:
+        reason = result.errors[-1] if result.errors else "Tailoring failed."
+        if "is not among" in reason:
+            reason = "Could not score the pasted job, so it could not be tailored. Please try again."
+        raise HTTPException(status_code=502, detail=reason)
 
     return TailorResponse(
         thread_id=req.thread_id,
