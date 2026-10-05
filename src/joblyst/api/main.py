@@ -4,10 +4,15 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, UploadFile
 
-from joblyst.api.schemas import SearchRequest, SearchResponse
+from joblyst.api.schemas import (
+    SearchRequest,
+    SearchResponse,
+    TailorRequest,
+    TailorResponse,
+)
 from joblyst.exceptions import CVReadError
 from joblyst.profile import extract_profile
-from joblyst.runner import run_search
+from joblyst.runner import run_search, run_tailor
 from joblyst.tools.cv_reader import extract_cv_content
 
 app = FastAPI()
@@ -77,4 +82,39 @@ def search(req: SearchRequest):
         jobs=result.ranked_jobs,
         sources=result.jobs_sources,
         reformulation_count=result.reformulation_count,
+    )
+
+
+@app.post("/api/tailor", response_model=TailorResponse)
+def tailor(req: TailorRequest):
+    session = SESSIONS.get(req.thread_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown thread_id {req.thread_id}. Upload a CV first.",
+        )
+
+    result = run_tailor(
+        thread_id=str(req.thread_id), selected_job_id=req.selected_job_id
+    )
+
+    # No pack means tailoring refused. run_tailor doesn't reset `errors`, so the
+    # list still holds this thread's search messages; the tailor node's reason is
+    # the last entry. Matching on its wording ties this to graph/nodes/tailor.py.
+    if not result.pack:
+        reason = result.errors[-1] if result.errors else "Tailoring failed."
+        if "run a job search first" in reason:
+            status_code = 409  # right thread, wrong order: no search has run yet
+        elif "is not among" in reason:
+            status_code = 404  # the job id isn't one of this thread's ranked jobs
+        else:
+            status_code = (
+                500  # e.g. empty corpus — can't happen via this API, so a server bug
+            )
+        raise HTTPException(status_code=status_code, detail=reason)
+
+    return TailorResponse(
+        thread_id=req.thread_id,
+        pack=result.pack,
+        fabrication_report=result.fabrication_report,  # type: ignore
     )
