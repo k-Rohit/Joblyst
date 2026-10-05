@@ -121,15 +121,26 @@ def run_tailor(
 
 
 def run_external_job(
-    *, thread_id: str, external_job_text: str, tags: list[str] | None = None
+    profile: Profile,
+    cv_text: str,
+    *,
+    thread_id: str,
+    external_job_text: str,
+    tags: list[str] | None = None,
 ) -> TailorResult:
     """Score a pasted job, then tailor + validate for it — one call, one thread.
 
-    Reuses an EXISTING thread's checkpointed profile/cv_text (from a prior
-    run_search on the same thread_id), same as run_tailor. If no search ever
-    ran on this thread, ``score_external_job`` records that in ``errors``.
+    Takes the profile and CV text explicitly, like ``run_search``, so pasting a
+    job works on a thread where no search has run. It used to read both from the
+    checkpoint, which only a search fills — so "upload a CV, then paste a job"
+    crashed on ``score_external_job``'s profile assert.
     """
-    inputs = {"external_job_text": external_job_text, "selected_job_id": None}
+    inputs = {
+        "profile": profile,
+        "cv_text": cv_text,
+        "external_job_text": external_job_text,
+        "selected_job_id": None,
+    }
     final = _invoke(inputs, thread_id=thread_id, tags=tags or ["external_job"])
 
     return TailorResult(
