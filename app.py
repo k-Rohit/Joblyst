@@ -160,6 +160,8 @@ with tab_external:
     if st.button("Score, tailor, and validate", type="primary"):
         with st.spinner("Extracting fields, scoring, tailoring, validating..."):
             ext_result = run_external_job(
+                st.session_state.profile,
+                st.session_state.cv_text,
                 thread_id=st.session_state.thread_id,
                 external_job_text=job_text,
             )
