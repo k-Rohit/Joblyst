@@ -20,5 +20,5 @@ class SearchResponse(BaseModel):
 
 
 class ProfileResponse(BaseModel):
-    thread_id: str
+    thread_id: UUID
     profile: Profile

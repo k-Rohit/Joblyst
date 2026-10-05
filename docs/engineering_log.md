@@ -668,6 +668,33 @@ Tested a fix, not yet wired in: choose the source lines with embeddings (`text-e
 
 Also noticed while explaining the code, not yet fixed: LangChain's `with_retry` defaults to `retry_if_exception_type=(Exception,)`, so permanent errors such as a malformed request or a bad API key are retried eight times with growing waits before failing. It should retry only on rate-limit, timeout and connection errors.
 
+## 2026-10-05 · A second search on the same thread continued the first one
+
+**Symptom.** Found while designing `POST /api/search`, where "change the location and search again" is the obvious user action. Two searches on one thread, Bengaluru then Mumbai: the Mumbai search returned 25 jobs, **20 of them from the Bengaluru search**. The LLM-call counter went 9 -> 12 across the two, instead of each search counting its own.
+
+**Root cause.** `run_search` passed only four fields into the graph (`profile`, `cv_text`, `selected_job_id`, `target_role`). LangGraph restores every other field from the thread's checkpoint, so the second search started from the first one's leftovers:
+- `jobs` — `fetch_jobs` merges new results into the old list, and the 25-job cap was already mostly full of Bengaluru postings;
+- `ranked_jobs` — `rank_jobs` keeps already-scored jobs;
+- `reformulation_count` — the retry budget carried over, so a second search got fewer broadening attempts;
+- `llm_calls` — kept climbing, so after a few searches on one thread the per-run LLM budget guard would refuse to run at all.
+
+A second, worse bug sat in the same place: nothing ever cleared `external_job_text`. After a user pasted a job, the next "search" on that thread was routed by `route_entry` to `score_external_job` — re-scoring the pasted job instead of searching.
+
+The Streamlit app had both bugs too: it reuses one thread for every search in a browser session.
+
+**Fix.** `run_search` now resets every per-search field in its inputs — `jobs`, `ranked_jobs`, `jobs_sources`, `search_query`, `reformulation_count`, `llm_calls`, `errors` and `external_job_text`. Tailoring fields are left alone: a search never reads them and the next tailoring run overwrites them.
+
+**Result.** Same two-search experiment:
+
+| | before | after |
+|---|---|---|
+| search-1 jobs in search 2's results | 20 of 25 | **0 of 25** |
+| `llm_calls` | 9 -> 12, stacked | 6, then 10 — each search its own |
+| `reformulation_count` | carried over | 0, then 1 |
+| search after a pasted job | re-scored the pasted job | a real search (20 jobs, adzuna + remotive) |
+
+Still open: `run_tailor` and `run_external_job` inherit `llm_calls` from the search before them, so a tailoring run's budget already has the search's calls counted against it — the same pattern, harmless today. A unit test pinning the reset (patch `_invoke`, assert the inputs) belongs in `tests/test_api.py`.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
