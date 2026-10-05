@@ -1,6 +1,6 @@
 import tempfile
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, UploadFile
 
@@ -10,7 +10,7 @@ from joblyst.tools.cv_reader import extract_cv_content
 
 app = FastAPI()
 
-SESSIONS: dict[str, dict] = {}
+SESSIONS: dict[UUID, dict] = {}
 
 
 @app.get("/")
@@ -36,7 +36,9 @@ def upload_profile(file: UploadFile):
             detail = str(exc).replace(Path(tmp.name).name, file.filename or "your CV")
             raise HTTPException(status_code=400, detail=detail) from exc
 
-    thread_id = str(uuid4())
-    profile = extract_profile(cv_content, thread_id=thread_id, tags=["api", "extract"])
+    thread_id = uuid4()
+    # UUID is the API's own id format; the core (LangGraph, Opik, batch scripts) uses
+    # plain string ids, so convert at this boundary only.
+    profile = extract_profile(cv_content, thread_id=str(thread_id), tags=["api", "extract"])
     SESSIONS[thread_id] = {"cv_text": cv_content, "profile": profile}
     return {"thread_id": thread_id, "profile": profile}
