@@ -695,6 +695,20 @@ The Streamlit app had both bugs too: it reuses one thread for every search in a 
 
 Still open: `run_tailor` and `run_external_job` inherit `llm_calls` from the search before them, so a tailoring run's budget already has the search's calls counted against it — the same pattern, harmless today. A unit test pinning the reset (patch `_invoke`, assert the inputs) belongs in `tests/test_api.py`.
 
+## 2026-10-05 · Pasting a job without searching first crashed with a 500
+
+**Symptom.** Found while building `POST /api/external-job`. Upload a CV, then paste a job description with no search in between — a natural flow for "I found this job on LinkedIn" — and the request failed with **500 Internal Server Error**. The real error: `AssertionError: score_external_job requires profile to already be set`. The Streamlit app had the same crash: its "Paste an external job" tab is usable right after profile extraction.
+
+**Root cause.** The graph reads the profile from its state, and only `run_search` ever put it there — its inputs include `profile` and `cv_text`. `run_external_job` passed only the pasted text, so on a thread with no prior search, `score_external_job` found no profile and its assert fired. The feature had been designed as an add-on *after* a search ("reuses an existing thread's checkpointed profile"), and the docstring promised a graceful `errors` entry that was never implemented. The assert itself is correct — it is the "fail loudly on missing required input" rule from the empty-profile ranking bug, and without it the job would have been scored against an empty profile. The gap was that the caller had no way to supply what the assert required.
+
+**Fix.** `run_external_job` takes `profile` and `cv_text` explicitly, like `run_search`, and puts them in the graph's inputs. Both callers pass them: the API route from its session store, Streamlit from `st.session_state`.
+
+**Result.** Upload a CV, then paste a job with no search: **500 -> 200**, with a tailored CV, a cover letter and a fabrication report (0 flags / 25 claims). 28 tests pass.
+
+Side effect, accepted: a pasted job is scored against the profile without location preferences, which are applied per search and not stored. For a job the user chose themselves that is reasonable.
+
+Also seen twice today, not fixed: the tailored CV's headline came back as the candidate's name alone (`'Ananya Rao'`) rather than a professional headline. A tailoring-prompt issue for v2.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
