@@ -16,9 +16,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    joblyst_fetch_model: str = Field(default="openai:gpt-4.1-nano", alias="JOBLYST_FETCH_MODEL")
+    database_url: SecretStr | None = None
+
+    joblyst_fetch_model: str = Field(
+        default="openai:gpt-4.1-nano", alias="JOBLYST_FETCH_MODEL"
+    )
     joblyst_model: str = Field(default="", alias="JOBLYST_MODEL")
-    
+
     openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
     llm_model: str = "openai:gpt-4o-mini"
 
@@ -26,16 +30,20 @@ class Settings(BaseSettings):
     opik_workspace: str = Field(default="", alias="OPIK_WORKSPACE")
     opik_project_name: str = Field(default="joblyst", alias="OPIK_PROJECT_NAME")
     opik_enabled: bool = Field(default=True, alias="OPIK_ENABLED")
-    
-    resume_dir: str = './data'
-    
+
+    resume_dir: str = "./data"
+
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_api_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
     jooble_api_key: SecretStr = Field(default=SecretStr(""), alias="JOOBLE_API_KEY")
-    jooble_base_url: str = Field(default="https://jooble.org/api", alias="JOOBLE_BASE_URL")
-    
-    search_concurrent_sources: bool = Field(default=True, alias="SCOUT_CONCURRENT_SOURCES")
+    jooble_base_url: str = Field(
+        default="https://jooble.org/api", alias="JOOBLE_BASE_URL"
+    )
+
+    search_concurrent_sources: bool = Field(
+        default=True, alias="SCOUT_CONCURRENT_SOURCES"
+    )
     joblyst_source_soft_deadline: float = Field(
         default=1.0,
         alias="JOBLYST_SOURCE_SOFT_DEADLINE",
@@ -56,13 +64,21 @@ class Settings(BaseSettings):
         alias="MAX_LLM_CALLS_PER_RUN",
         description="Circuit breaker: raises LLMBudgetExceededError if a run would exceed this many LLM calls.",
     )
-    
-    fab_bullet_ratio: float = Field(default=0.65)  # min similarity a rewritten CV bullet must keep vs its cited corpus item
-    fab_skill_ratio: float = Field(default=0.85)  # min similarity a claimed skill must have vs the corpus's real skill vocabulary
-    fab_letter_ratio: float = Field(default=0.55)  # min similarity a cover-letter sentence must have vs corpus/research/job-context text
+
+    fab_bullet_ratio: float = Field(
+        default=0.65
+    )  # min similarity a rewritten CV bullet must keep vs its cited corpus item
+    fab_skill_ratio: float = Field(
+        default=0.85
+    )  # min similarity a claimed skill must have vs the corpus's real skill vocabulary
+    fab_letter_ratio: float = Field(
+        default=0.55
+    )  # min similarity a cover-letter sentence must have vs corpus/research/job-context text
     # The fabrication judge. Deliberately stronger than the tailoring model: a judge
     # no better than the writer it grades tends to share the writer's blind spots.
-    joblyst_judge_model: str = Field(default="openai:gpt-4.1", alias="JOBLYST_JUDGE_MODEL")
+    joblyst_judge_model: str = Field(
+        default="openai:gpt-4.1", alias="JOBLYST_JUDGE_MODEL"
+    )
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
 
@@ -73,6 +89,7 @@ class Settings(BaseSettings):
     @property
     def has_tavily(self) -> bool:
         return bool(self.tavily_api_key.get_secret_value())
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
