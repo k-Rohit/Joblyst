@@ -59,9 +59,10 @@ def run_search(
 
     ``selected_job_id`` is passed explicitly as None so a reused thread never
     routes into stale tailoring (see ``route_entry`` in graph.py).
-    """
 
-    "Every per-search field is reset, because a new search must start fresh rather than continue the last one on this thread."
+    Every per-search field is reset, because a new search must start fresh
+    rather than continue the last one on this thread.
+    """
     inputs = {
         "profile": profile,
         "cv_text": cv_text,

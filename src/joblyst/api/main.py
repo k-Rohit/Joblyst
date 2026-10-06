@@ -1,9 +1,10 @@
 import tempfile
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile, status
 
+from joblyst.api import sessions
 from joblyst.api.schemas import (
     ExternalJobRequest,
     ProfileResponse,
@@ -19,8 +20,6 @@ from joblyst.tools.cv_reader import extract_cv_content
 
 app = FastAPI()
 
-SESSIONS: dict[UUID, dict] = {}
-
 
 @app.get("/")
 @app.get("/health")
@@ -28,7 +27,9 @@ def check_status():
     return {"status": "healthy"}
 
 
-@app.post("/api/profile", response_model=ProfileResponse)
+@app.post(
+    "/api/profile", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED
+)
 def upload_profile(file: UploadFile):
     if file.content_type != "application/pdf":
         raise HTTPException(
@@ -51,7 +52,7 @@ def upload_profile(file: UploadFile):
     profile = extract_profile(
         cv_content, thread_id=str(thread_id), tags=["api", "extract"]
     )
-    SESSIONS[thread_id] = {"cv_text": cv_content, "profile": profile}
+    sessions.save(thread_id, cv_content, profile)
     return ProfileResponse(thread_id=thread_id, profile=profile)
 
 
@@ -59,7 +60,7 @@ def upload_profile(file: UploadFile):
 def search(req: SearchRequest):
     # check what is stored in the current session (mainly for profile as that will
     # help the llm to write the search query)
-    session = SESSIONS.get(req.thread_id)
+    session = sessions.get(req.thread_id)
     if not session:
         raise HTTPException(
             status_code=404,
@@ -89,7 +90,7 @@ def search(req: SearchRequest):
 
 @app.post("/api/tailor", response_model=TailorResponse)
 def tailor(req: TailorRequest):
-    session = SESSIONS.get(req.thread_id)
+    session = sessions.get(req.thread_id)
     if not session:
         raise HTTPException(
             status_code=404,
@@ -124,7 +125,7 @@ def tailor(req: TailorRequest):
 
 @app.post("/api/external-job", response_model=TailorResponse)
 def external(req: ExternalJobRequest):
-    session = SESSIONS.get(req.thread_id)
+    session = sessions.get(req.thread_id)
     if not session:
         raise HTTPException(
             status_code=404,
