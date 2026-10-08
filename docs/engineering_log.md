@@ -709,6 +709,28 @@ Side effect, accepted: a pasted job is scored against the profile without locati
 
 Also seen twice today, not fixed: the tailored CV's headline came back as the candidate's name alone (`'Ananya Rao'`) rather than a professional headline. A tailoring-prompt issue for v2.
 
+## 2026-10-08 · Moving the API's state to Supabase (in progress)
+
+**Why.** The API remembers two things between requests, and both lived in process memory. The **session** — CV text and extracted profile, saved by `POST /api/profile` and needed by search and external-job — is a dict. The **graph checkpoint** — jobs, ranked jobs, tailoring output, needed by `POST /api/tailor` — is LangGraph's `MemorySaver`. Restart or redeploy the server and every user's upload and search is gone; run two server processes and a user's upload and their search can land on different ones. Both move to one Postgres database (Supabase), reached through one connection pool. The session can't simply live in the checkpoint: profile extraction runs *before* the graph, so no checkpoint exists until the first search.
+
+**Phase A — sessions behind two functions.** Routes now call `sessions.save()` / `sessions.get()` instead of touching a dict, so the storage can change without the routes changing. The refactor introduced one bug, caught immediately by the existing API tests: `get()` used `_SESSIONS[thread_id]`, which raises `KeyError` for an unknown thread, so the routes' intended **404** became an unhandled **500**. Fixed with `_SESSIONS.get(thread_id)`. A one-character difference that reads fine — the reason the tests were written before this refactor.
+
+**Phase B — Supabase setup, and what bit.**
+- *Connection string.* Used the **session pooler** (port 5432). The direct connection is IPv6-only on the free tier, and the transaction pooler (port 6543) breaks prepared statements, which LangGraph's checkpointer relies on.
+- *Row Level Security.* Supabase exposes every table through a public REST API usable with the project's public `anon` key. RLS is enabled on `candidate_sessions` with **no policies**, which denies all access through that API. The server connects as the `postgres` user, the table owner, which RLS does not restrict. Supabase's notice "no RLS policies exist so no data will be returned" is this protection working, not an error.
+- *A password containing `@` broke the URL.* A connection URL is `postgresql://USER:PASSWORD@HOST/...`, so an `@` inside the password made the parser cut it in the wrong place and try to resolve part of the password as the hostname. The error message also printed that fragment of the password, so the password was reset rather than URL-encoded. New rule: long alphanumeric database passwords only.
+- *Region.* The project was created in Seoul (`ap-northeast-2`), not Mumbai (`ap-south-1`). Measured from India: **~157 ms per query**, against roughly 10-30 ms expected in Mumbai. Acceptable for development; worth recreating in Mumbai before deploying, since Supabase cannot move a project.
+
+**Phase C — the connection pool (designed and verified, not yet in `db.py`).** One `psycopg_pool.ConnectionPool` for the whole app, shared by sessions and the checkpointer, opened only when `DATABASE_URL` is set so the batch scripts, evals, Streamlit and tests keep running with no database. Decisions:
+- `autocommit=True, prepare_threshold=0, row_factory=dict_row` — copied from how LangGraph's `PostgresSaver` opens its own connections (verified in the installed package source), since the checkpointer will use this pool.
+- `min_size=1, max_size=5` — a judgement call for the free tier's low connection limit, not a measurement.
+- `open=False`, then `open(wait=True, timeout=30)` at startup. With the default `wait=False`, `open()` returns instantly even when the database is unreachable, and the **first user's request** is what fails — measured against a deliberately wrong address: `open()` "succeeded" in 0.00 s and the first `connection()` raised `PoolTimeout` 3 s later. With `wait=True`, `open()` itself raises, so a wrong password stops the **server from starting** instead. Cost: ~0.9 s added to startup against this Supabase project.
+- `get_pool()` raises a clear `RuntimeError` if the pool was never opened, rather than returning `None` — the same fail-loudly rule as required prompt inputs.
+
+Verified against the real database in a scratch run: opened in 0.9 s, a second `open_pool()` does not create a second pool, rows come back as dicts, `close_pool()` releases it.
+
+**Still to do.** Put the pool code into `db.py` and open/close it in FastAPI's `lifespan`; store sessions in `candidate_sessions` (Phase D); swap `MemorySaver` for `PostgresSaver` on the same pool (Phase E); then the restart test — upload, restart the server, search, tailor. Also: commit `schema.sql`, and schedule the nightly `pg_cron` purge of expired CVs.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
