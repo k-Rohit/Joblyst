@@ -1,4 +1,5 @@
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,12 +14,24 @@ from joblyst.api.schemas import (
     TailorRequest,
     TailorResponse,
 )
+from joblyst.db import close_pool, open_pool
 from joblyst.exceptions import CVReadError
 from joblyst.profile import extract_profile
 from joblyst.runner import run_external_job, run_search, run_tailor
 from joblyst.tools.cv_reader import extract_cv_content
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    open_pool()
+    yield
+
+    # shutdown
+    close_pool()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/")
