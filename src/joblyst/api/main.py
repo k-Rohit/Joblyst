@@ -1,9 +1,12 @@
+import logging
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from joblyst.api import sessions
 from joblyst.api.schemas import (
@@ -16,10 +19,18 @@ from joblyst.api.schemas import (
 )
 from joblyst.db import close_pool, open_pool
 from joblyst.exceptions import CVReadError
-from joblyst.graph.graph import get_compiled_graph
+from joblyst.graph.graph import GOOD_FIT_THRESHOLD, get_compiled_graph
 from joblyst.profile import extract_profile
-from joblyst.runner import run_external_job, run_search, run_tailor
+from joblyst.runner import (
+    run_external_job,
+    run_search,
+    run_tailor,
+    search_result,
+    stream_search,
+)
 from joblyst.tools.cv_reader import extract_cv_content
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -32,6 +43,22 @@ async def lifespan(app: FastAPI):
 
     # shutdown
     close_pool()
+
+
+def progress_message(node: str, update: dict) -> str | None:
+    """Turn one graph step's update into a line the user can read, or None to stay quiet."""
+    if node == "fetch_jobs":
+        query = update.get("search_query")
+        total = len(update.get("jobs", []))  # running total across rounds, not just this one
+        sources = ", ".join(update.get("jobs_sources", []))
+        return f"Searched for '{query}': {total} jobs so far ({sources})"
+    if node == "rank_jobs":
+        ranked = update.get("ranked_jobs", [])
+        strong = sum(1 for r in ranked if r.fit_score >= GOOD_FIT_THRESHOLD)
+        return f"Scored {len(ranked)} jobs, {strong} strong match{'' if strong == 1 else 'es'}"
+    if node == "reformulate_query":
+        return f"Not enough strong matches, trying '{update.get('search_query')}'"
+    return None
 
 
 app = FastAPI(lifespan=lifespan)
@@ -102,6 +129,59 @@ def search(req: SearchRequest):
         sources=result.jobs_sources,
         reformulation_count=result.reformulation_count,
     )
+
+
+def search_session(req: SearchRequest) -> dict:
+    """The stored session for a search request, or a real 404.
+
+    A dependency, not a check inside the route: a streaming route's body only
+    starts running after "200 OK" has already been sent, so an HTTPException
+    raised there reaches the client as an empty 200. Dependencies run first.
+    """
+    session = sessions.get(req.thread_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown thread_id {req.thread_id}. Upload a CV first.",
+        )
+    return session
+
+
+@app.post("/api/search/stream", response_class=EventSourceResponse)
+def search_stream(req: SearchRequest, session: Annotated[dict, Depends(search_session)]):
+    """Same search as /api/search, but sends progress events while it runs.
+
+    Events: `progress` (one per step, with a readable message), then either
+    `result` (shaped like SearchResponse) or `error`.
+    """
+    profile = session["profile"].model_copy(
+        update={"locations": req.locations, "remote_ok": req.remote_ok}
+    )
+    thread_id = str(req.thread_id)
+    try:
+        for node, update in stream_search(
+            profile,
+            session["cv_text"],
+            thread_id=thread_id,
+            tags=["api", "search", "stream"],
+            target_role=req.target_role,
+        ):
+            message = progress_message(node, update)
+            if message:
+                yield ServerSentEvent(event="progress", data={"node": node, "message": message})
+        result = search_result(thread_id)
+    except Exception:
+        logger.exception("search stream failed for thread %s", thread_id)
+        yield ServerSentEvent(event="error", data={"detail": "The search failed. Please try again."})
+        return
+
+    response = SearchResponse(
+        thread_id=req.thread_id,
+        jobs=result.ranked_jobs,
+        sources=result.jobs_sources,
+        reformulation_count=result.reformulation_count,
+    )
+    yield ServerSentEvent(event="result", data=response.model_dump(mode="json"))
 
 
 @app.post("/api/tailor", response_model=TailorResponse)

@@ -16,6 +16,7 @@ call's thread_id onto every later call sharing that same graph object.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from joblyst.graph.graph import get_compiled_graph
@@ -47,23 +48,13 @@ class SearchResult:
     errors: list[str] = field(default_factory=list)
 
 
-def run_search(
-    profile: Profile,
-    cv_text: str,
-    *,
-    thread_id: str,
-    tags: list[str] | None = None,
-    target_role: str | None = None,
-) -> SearchResult:
-    """Run the job-search half of the graph for an already-extracted profile.
-
-    ``selected_job_id`` is passed explicitly as None so a reused thread never
-    routes into stale tailoring (see ``route_entry`` in graph.py).
+def _search_inputs(profile: Profile, cv_text: str, target_role: str | None) -> dict:
+    """The graph inputs for a new search, shared by run_search and stream_search.
 
     Every per-search field is reset, because a new search must start fresh
     rather than continue the last one on this thread.
     """
-    inputs = {
+    return {
         "profile": profile,
         "cv_text": cv_text,
         "selected_job_id": None,
@@ -77,8 +68,63 @@ def run_search(
         "errors": [],
         "external_job_text": None,
     }
-    final = _invoke(inputs, thread_id=thread_id, tags=tags or ["search"])
 
+
+def run_search(
+    profile: Profile,
+    cv_text: str,
+    *,
+    thread_id: str,
+    tags: list[str] | None = None,
+    target_role: str | None = None,
+) -> SearchResult:
+    """Run the job-search half of the graph for an already-extracted profile.
+
+    ``selected_job_id`` is passed explicitly as None so a reused thread never
+    routes into stale tailoring (see ``route_entry`` in graph.py).
+    """
+    inputs = _search_inputs(profile, cv_text, target_role)
+    final = _invoke(inputs, thread_id=thread_id, tags=tags or ["search"])
+    return _to_search_result(final)
+
+
+def stream_search(
+    profile: Profile,
+    cv_text: str,
+    *,
+    thread_id: str,
+    tags: list[str] | None = None,
+    target_role: str | None = None,
+) -> Iterator[tuple[str, dict]]:
+    """Run a search like ``run_search``, handing out each node's update as it finishes.
+
+    Yields ``(node_name, update)``, where ``update`` holds only the fields that
+    node changed. Once the loop ends, read the finished search with
+    ``search_result(thread_id)``.
+    """
+    inputs = _search_inputs(profile, cv_text, target_role)
+    tracer = get_tracer(thread_id, tags or ["search"])
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": [tracer] if tracer else [],
+    }
+    try:
+        for chunk in get_compiled_graph().stream(inputs, config=config, stream_mode="updates"):
+            for node, update in chunk.items():
+                yield node, update or {}
+    finally:
+        # Runs even if the client disconnects mid-search, so the trace still reaches Opik.
+        if tracer:
+            tracer.flush()
+
+
+def search_result(thread_id: str) -> SearchResult:
+    """The finished search on this thread, read back from the graph's checkpoint."""
+    state = get_compiled_graph().get_state({"configurable": {"thread_id": thread_id}})
+    return _to_search_result(state.values)
+
+
+def _to_search_result(final: dict) -> SearchResult:
     return SearchResult(
         profile=final.get("profile"),
         ranked_jobs=final.get("ranked_jobs", []),
