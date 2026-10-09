@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 
+from joblyst import db
 from joblyst.graph.nodes import fetch_jobs, rank_jobs, reformulate_query
 from joblyst.graph.nodes.score_external_job import score_external_job
 from joblyst.graph.nodes.tailor import tailor
@@ -36,8 +39,19 @@ _CHECKPOINT_TYPES = [
 ]
 
 
-def _checkpointer() -> MemorySaver:
-    return MemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=_CHECKPOINT_TYPES))
+def _checkpointer() -> BaseCheckpointSaver:
+    """Postgres when the API has opened its pool; in-memory otherwise.
+
+    The API server opens the pool at startup, so its checkpoints survive a
+    restart. The batch scripts, evals, Streamlit and tests never open it, so
+    they keep running with no database at all.
+    """
+    serde = JsonPlusSerializer(allowed_msgpack_modules=_CHECKPOINT_TYPES)
+    if db.is_open():
+        saver = PostgresSaver(db.get_pool(), serde=serde)
+        saver.setup()  # creates LangGraph's own tables; tracks what exists, so safe on every start
+        return saver
+    return MemorySaver(serde=serde)
 
 # routing functions -
 def route_entry(state: AgentState) -> str:
@@ -74,7 +88,7 @@ def should_reformulate(state: AgentState) -> str:
         return "reformulate_query"
     return END
 
-def _build_graph(checkpointer: MemorySaver | None = None):
+def _build_graph(checkpointer: BaseCheckpointSaver | None = None):
     "Build and compile the job-finding + tailoring graph"
     builder = StateGraph(AgentState)
     builder.add_node("fetch_jobs", fetch_jobs)

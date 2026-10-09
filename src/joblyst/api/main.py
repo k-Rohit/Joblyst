@@ -16,6 +16,7 @@ from joblyst.api.schemas import (
 )
 from joblyst.db import close_pool, open_pool
 from joblyst.exceptions import CVReadError
+from joblyst.graph.graph import get_compiled_graph
 from joblyst.profile import extract_profile
 from joblyst.runner import run_external_job, run_search, run_tailor
 from joblyst.tools.cv_reader import extract_cv_content
@@ -25,6 +26,8 @@ from joblyst.tools.cv_reader import extract_cv_content
 async def lifespan(app: FastAPI):
     # startup
     open_pool()
+    # Build the graph now that the database is open, so it saves to Postgres.
+    get_compiled_graph()
     yield
 
     # shutdown

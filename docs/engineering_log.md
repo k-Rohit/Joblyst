@@ -810,8 +810,10 @@ From reading all 38 flags of the 2026-10-03 batch (about 21 real, about 17 false
 - Career-changer label: `None` or `2` years of data experience. A judgment for the human, not the extractor.
 - `primary_roles` prompt contradicts itself: the header says "extract only what the CV states", the field says "include the natural next step".
 - `senior_mle_in` extracts as `lead` against a `senior` label in every run.
+- Seniority can ignore the prompt's own ladder: the author's real CV (1.5 years) extracted as `mid`, where the rule says 0-2 years is `junior`. The same CV produced a garbled skill, `model data engineering`.
 
 **Search and ranking**
+- The ranker never sees the candidate's work achievements. `Profile` has no work-experience field — experience is condensed into `primary_roles`, `skills`, `years_experience`, `seniority` and `raw_summary` — and `_render_profile` sends neither `raw_summary` nor any achievement to the ranking prompt. It does send `projects`. So for a data engineer applying to data-engineering roles, the ranker sees four detailed AI projects and, for the actual job, only a title, a skills list and "1.5 years"; "2M+ records" and "75% faster" never reach it. The reference repo has the same gap and sends even less (no projects). v2: add an `experience_highlights` field (2-4 one-line achievements, like `projects`) or render `raw_summary`, and measure it on the ranking eval before keeping it.
 - `fetch_jobs` can issue the same query twice (dedupe identical `(query, country, remote)` tuples), and `ensure_budget` counts the one LLM call, not the several searches it authorises.
 - One pivot-case run chose `country='gb'` for a Pune candidate.
 - The ranking dataset does not store the job's `remote` flag, so the eval replay always sends `remote=False` (12 of 46 originals were remote).
