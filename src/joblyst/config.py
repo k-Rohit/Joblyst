@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     )
 
     database_url: SecretStr | None = None
+    # Frontend addresses allowed to call the API. In .env as a JSON list:
+    # CORS_ORIGINS='["http://localhost:3000","https://joblyst.vercel.app"]'
+    cors_origins: list[str] = ["http://localhost:3000"]
 
     joblyst_fetch_model: str = Field(
         default="openai:gpt-4.1-nano", alias="JOBLYST_FETCH_MODEL"

@@ -22,6 +22,8 @@ class SearchResponse(BaseModel):
 class ProfileResponse(BaseModel):
     thread_id: UUID
     profile: Profile
+    # Role headings copied from the CV (corpus.work_history), not LLM output.
+    experience: list[str] = Field(default_factory=list)
 
 
 class TailorRequest(BaseModel):
@@ -35,6 +37,9 @@ class TailorResponse(BaseModel):
     # Always present when there is a pack — validate_tailoring only returns None
     # when tailoring produced nothing. The flag count is fabrication_report.flags.
     fabrication_report: FabricationReport
+    # corpus_ref -> the original CV line that tailored bullet was rewritten from,
+    # so the user can compare the two.
+    sources: dict[str, str] = Field(default_factory=dict)
 
 
 class ExternalJobRequest(BaseModel):

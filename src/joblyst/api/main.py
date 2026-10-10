@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from joblyst.api import sessions
@@ -17,6 +18,8 @@ from joblyst.api.schemas import (
     TailorRequest,
     TailorResponse,
 )
+from joblyst.config import get_settings
+from joblyst.corpus import build_corpus
 from joblyst.cv_pdf import render_cv_pdf
 from joblyst.db import close_pool, open_pool
 from joblyst.exceptions import CVReadError
@@ -30,6 +33,7 @@ from joblyst.runner import (
     stream_search,
     tailored_pack,
 )
+from joblyst.schemas.schemas import TailoringPack
 from joblyst.tools.cv_reader import extract_cv_content
 
 logger = logging.getLogger(__name__)
@@ -45,6 +49,18 @@ async def lifespan(app: FastAPI):
 
     # shutdown
     close_pool()
+
+
+def cited_sources(pack: TailoringPack, cv_text: str) -> dict[str, str]:
+    """The original CV line behind each tailored bullet, keyed by its corpus_ref.
+
+    Rebuilt from the session's CV text; build_corpus is deterministic, so the ids
+    match the ones the tailor node cited.
+    """
+    corpus = build_corpus(cv_text)
+    bullets = [b for e in pack.cv.experience for b in e.bullets]
+    bullets += [b for p in pack.cv.project for b in p.project_bullets]
+    return {b.corpus_ref: item.text for b in bullets if (item := corpus.get(b.corpus_ref))}
 
 
 def progress_message(node: str, update: dict) -> str | None:
@@ -64,6 +80,14 @@ def progress_message(node: str, update: dict) -> str | None:
 
 
 app = FastAPI(lifespan=lifespan)
+# The frontend runs on a different address (localhost:3000, later the Vercel URL),
+# and browsers block calls to another address unless the API lists it here.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 @app.get("/")
@@ -98,7 +122,11 @@ def upload_profile(file: UploadFile):
         cv_content, thread_id=str(thread_id), tags=["api", "extract"]
     )
     sessions.save(thread_id, cv_content, profile)
-    return ProfileResponse(thread_id=thread_id, profile=profile)
+    return ProfileResponse(
+        thread_id=thread_id,
+        profile=profile,
+        experience=build_corpus(cv_content).work_history(),
+    )
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -218,6 +246,7 @@ def tailor(req: TailorRequest):
         thread_id=req.thread_id,
         pack=result.pack,
         fabrication_report=result.fabrication_report,  # type: ignore
+        sources=cited_sources(result.pack, session["cv_text"]),
     )
 
 
@@ -268,4 +297,5 @@ def external(req: ExternalJobRequest):
         thread_id=req.thread_id,
         pack=result.pack,
         fabrication_report=result.fabrication_report,  # type: ignore
+        sources=cited_sources(result.pack, session["cv_text"]),
     )

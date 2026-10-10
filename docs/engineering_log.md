@@ -743,6 +743,32 @@ Verified against the real database in a scratch run: opened in 0.9 s, a second `
 
 Limits: scripts outside Latin-1 (Devanagari, Chinese) print as `?`; fixing that means bundling a Unicode TTF font. The PDF has no contact line, because `Profile` doesn't store email or phone.
 
+## 2026-10-10 · The Next.js frontend, and CORS
+
+**Why.** A live link needs a real frontend; Streamlit can't be deployed as the product. Next.js on Vercel, with the FastAPI backend hosted separately (Vercel cuts long requests, and a search streams for about a minute).
+
+**What.** `frontend/`: Next.js 16, React 19, TypeScript, plain CSS (no UI library). One page with four steps that follow the API: upload CV → profile and preferences → live search and matches → tailored CV with the fabrication check. All API calls live in `frontend/utils/api.ts`, with types copied from `api/schemas.py`. (Not `lib/`: the root `.gitignore` ignores every folder named `lib`.)
+- *Streaming over POST.* The browser's `EventSource` only does GET, and the search is a POST with a JSON body, so `streamSearch` reads the response with `fetch` and splits it into events itself (blocks ending in a blank line, `event:` and `data:` lines). A 404 for an unknown thread arrives as a normal JSON error before the stream, thanks to the `search_session` dependency.
+- *Flags shown in place.* A flagged bullet is matched by `where == "cv_bullet:<corpus_ref>"` and highlighted with the judge's reason; flagged skills by `skill:<name>`; summary, headline and cover-letter flags appear under that section.
+- *Design gaps found on the way.* The API returns less than the first mockup assumed: `Profile` has no list of past jobs, the fabrication report has no per-section counts, and bullets don't carry their original CV line. The screens show what exists (roles, skills, projects, summary; total flags plus each flagged claim) instead.
+- *TypeScript pinned to 5.* `npm install` picked TypeScript 7 (the native compiler); pinned to 5 so Next's type-check works.
+
+**CORS.** Browsers block calls from one address (the frontend, `localhost:3000` or the Vercel URL) to another (the API) unless the API lists the caller. `CORSMiddleware` with `cors_origins` from settings, default `["http://localhost:3000"]`, set as a JSON list in `.env` (`CORS_ORIGINS`) for production. Checked with a preflight request: the listed address gets `access-control-allow-origin`, an unlisted one gets **400**.
+
+**Result.** Production build passes with no type errors. One real run through the frontend's own `utils/api.ts` against the server with Supabase on (`data_engineer.pdf`, Bengaluru + remote): upload 9 s; search streamed **9 progress events live over 33 s**, then 20 jobs (top fit 75); tailoring 22 s, 5 of 30 claims flagged; PDF 200; an unknown thread showed "Unknown thread_id ... Upload a CV first." Screens checked in headless Chrome at 1280 px and 500 px, with dark mode following the system setting.
+
+Then a full click-through in a real (headless) Chrome driven over the DevTools protocol: choose the PDF, click "Read my CV" (8 s) → type "Bengaluru" + Enter (chip added), click "Find matching jobs" → **progress lines on screen while the heading still said "Searching…"** → 20 job cards after 23 s → "Tailor my CV" on the top job (20 s) → tailored screen with "4 of 30 claims flagged", per-section rows, flagged summary and cover-letter sentences shown in amber → Cover letter tab → Download PDF link returned 200 `application/pdf` from the browser (so CORS also holds for GET) → Back to matches kept all 20 cards. The first attempt stalled at the upload step because the test chose the file before React had attached its handlers; waiting for hydration fixed it, so it was a test-timing issue, not an app bug. The only browser error was a 404 for `/favicon.ico`; adding `app/icon.svg` removed it (fresh load: no errors).
+
+**Closing the two design gaps without touching any prompt.** Both came from the corpus, which is deterministic and copies the CV word for word:
+- *Past jobs on the profile screen.* `CandidateCorpus.work_history()` keeps experience-section lines that carry a date **range** ("(2021 - Present)", "Jan'25 – Oct'25"); talks, papers and certificates carry a single year and drop out. On all six fixture CVs: **16 of 16 roles found, 0 extra lines**. Returned as `ProfileResponse.experience`; pinned by `tests/test_corpus.py`. An LLM `experience` field on `Profile` was avoided, because it would change the extraction prompt and need the profile eval re-run.
+- *The original line under each tailored bullet.* `TailorResponse.sources` maps each bullet's `corpus_ref` to the CV line it was rewritten from, rebuilt from the session's CV text (`cited_sources` in `main.py`). The ids match the tailor node's because `build_corpus` is deterministic. The frontend shows "From your CV: …" only when the wording changed.
+
+*Step indicator.* User feedback: the "Step 1 of 4" label above the headline made the page read like a presentation slide. Removed it; the header's plain "1 Upload CV  2 Preferences…" text became a centred step bar (current step in a filled pill, finished steps ticked, later steps greyed; on narrow screens only the current step keeps its label).
+
+Checked on `data_engineer.pdf`: the profile screen lists "Data Engineer, Philips, Chennai · Nov'25 - Present" and "Data Engineer, StoneX Group Inc., Pune · Jan'25 – Oct'25"; a reworded bullet shows its TrackWise source line underneath. 36 tests pass.
+
+Seen in that run, not fixed: after "Not enough strong matches, trying 'data architect'", the next `fetch_jobs` reported "Searched for 'data engineer'", and the third round added 0 new jobs (20 → 20). Either `fetch_jobs` ignores the reformulated query or reports the wrong one in `search_query`. Needs a look in `fetch_jobs.py`.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
