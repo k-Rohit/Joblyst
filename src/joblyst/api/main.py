@@ -3,9 +3,9 @@ import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from joblyst.api import sessions
@@ -17,6 +17,7 @@ from joblyst.api.schemas import (
     TailorRequest,
     TailorResponse,
 )
+from joblyst.cv_pdf import render_cv_pdf
 from joblyst.db import close_pool, open_pool
 from joblyst.exceptions import CVReadError
 from joblyst.graph.graph import GOOD_FIT_THRESHOLD, get_compiled_graph
@@ -27,6 +28,7 @@ from joblyst.runner import (
     run_tailor,
     search_result,
     stream_search,
+    tailored_pack,
 )
 from joblyst.tools.cv_reader import extract_cv_content
 
@@ -216,6 +218,28 @@ def tailor(req: TailorRequest):
         thread_id=req.thread_id,
         pack=result.pack,
         fabrication_report=result.fabrication_report,  # type: ignore
+    )
+
+
+@app.get("/api/tailor/{thread_id}/pdf")
+def download_cv_pdf(thread_id: UUID):
+    session = sessions.get(thread_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown thread_id {thread_id}. Upload a CV first.",
+        )
+
+    pack = tailored_pack(str(thread_id))
+    if not pack:
+        raise HTTPException(status_code=409, detail="No tailored CV yet. Tailor a job first.")
+
+    pdf = render_cv_pdf(pack.cv, session["profile"].name)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        # "attachment" makes the browser save the file instead of opening it in a tab.
+        headers={"Content-Disposition": 'attachment; filename="tailored_cv.pdf"'},
     )
 
 

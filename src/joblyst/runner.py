@@ -167,6 +167,12 @@ def run_tailor(
     )
 
 
+def tailored_pack(thread_id: str) -> TailoringPack | None:
+    """The last tailored pack on this thread, read back from the checkpoint; None if never tailored."""
+    state = get_compiled_graph().get_state({"configurable": {"thread_id": thread_id}})
+    return state.values.get("tailoring")
+
+
 def run_external_job(
     profile: Profile,
     cv_text: str,

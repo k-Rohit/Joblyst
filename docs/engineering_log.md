@@ -731,6 +731,18 @@ Verified against the real database in a scratch run: opened in 0.9 s, a second `
 
 **Still to do.** Put the pool code into `db.py` and open/close it in FastAPI's `lifespan`; store sessions in `candidate_sessions` (Phase D); swap `MemorySaver` for `PostgresSaver` on the same pool (Phase E); then the restart test — upload, restart the server, search, tailor. Also: commit `schema.sql`, and schedule the nightly `pg_cron` purge of expired CVs.
 
+## 2026-10-10 · Download the tailored CV as a PDF
+
+**Why.** The frontend design has a "Download PDF" button on the tailored-CV screen, and the API only returned the CV as JSON. A user applying for a job needs a file to upload.
+
+**What.** `GET /api/tailor/{thread_id}/pdf`. The route doesn't take the CV in the request; it reads the last tailored pack from the graph's checkpoint (`runner.tailored_pack`), so the PDF is exactly what the fabrication check ran on. The drawing lives in `joblyst/cv_pdf.py`, using `fpdf2`, which was already a dependency for the fixture CVs. Errors: unknown thread **404**; a thread that was never tailored **409** (right thread, wrong order, the same rule as `/api/tailor` before a search). `Content-Disposition: attachment` makes the browser save the file rather than open it in a tab.
+
+**One trap, handled.** `fpdf2`'s built-in Helvetica only knows Latin-1 characters, and LLM text is full of curly quotes, en dashes and ellipses, any of which would crash the render with a 500. `_plain()` swaps those for plain ASCII ones; anything still outside Latin-1 (an emoji) becomes `?` instead of crashing.
+
+**Result.** Checked with a sample pack containing `“ ” ’ – …` and an emoji: unknown thread 404, not tailored 409, tailored **200** with a 1.5 KB one-page PDF. All sections render, a long bullet wraps, the name/headline/sections read back correctly with `pypdf`, and the emoji came out as `?`. 35 tests pass.
+
+Limits: scripts outside Latin-1 (Devanagari, Chinese) print as `?`; fixing that means bundling a Unicode TTF font. The PDF has no contact line, because `Profile` doesn't store email or phone.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case
