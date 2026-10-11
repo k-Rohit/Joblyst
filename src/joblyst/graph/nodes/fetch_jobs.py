@@ -31,8 +31,8 @@ MAX_QUERY_WORDS = 6
 _QUERY_SEPARATORS = re.compile(r"\s+(?:or|and)\s+|\s*[,;|]\s*", re.IGNORECASE)
 
 def _build_prompt(state: AgentState) -> str:
-    """ Describe the candiidtae to the LLM, adding reformulation guidance if looping.
-    Basically the HumanMesssage that we will be sending to the model.
+    """ Describe the candidate to the LLM: the HumanMessage for the first search.
+    Reformulation rounds don't use it; they search the reformulated query directly.
     """
     profile = state['profile']
     # extract_profile always runs before the graph starts, so this should never fire
@@ -53,12 +53,6 @@ def _build_prompt(state: AgentState) -> str:
             f"({', '.join(profile.skills[:15])}) and real projects "
             f"({'; '.join(profile.projects) or 'none listed'}) — weigh those, not their job history."
         )
-
-    reformulated = state.get('search_query')
-    if state.get("reformulation_count",0) and reformulated:
-        lines.append(
-            f"\n \nThe previous search returned too few good matches. Use this broader query and search again: {reformulated!r}"
-        )
     return "\n".join(lines)
 
 
@@ -66,19 +60,32 @@ def fetch_jobs(state: AgentState) -> dict:
     """Run the job search with LLM-chosen arguments and merge results into state."""
     settings = get_settings()
     calls = state.get("llm_calls",0)
-    ensure_budget(calls,1,settings.max_llm_calls_per_run)
     profile = state["profile"]
     errors = list(state.get("errors", []))
-    
+    assert profile is not None, "fetch_jobs requires profile to already be set"
+    location = profile.locations[0] if profile.locations else None
+
+    reformulated = state.get("search_query")
+    if state.get("reformulation_count", 0) and reformulated:
+        # A reformulation round searches exactly the title reformulate_query chose.
+        # It used to go back through the LLM as a suggestion, which the LLM ignored
+        # (5 of 5 times it returned to the profile's own title), so later rounds
+        # repeated the first search and added no new jobs. No LLM call here; the
+        # country is derived from the location by each job source.
+        query = reformulated
+        jobs, sources = run_search(
+            query=query, location=location, country=None, remote=profile.remote_ok, limit=settings.joblyst_max_jobs
+        )
+        jobs = _dedupe_with_existing(state.get("jobs", []), jobs)[:MERGED_CEILING]
+        return {"jobs": jobs, "search_query": query, "jobs_sources": sources, "errors": errors, "llm_calls": calls}
+
+    ensure_budget(calls,1,settings.max_llm_calls_per_run)
     # Choosing a small and faster model here as selecting tool
     # arguments is a trivial call.
     model_name = settings.joblyst_fetch_model
     model = get_chat_model(model_name, temperature=0.0).bind_tools([search_jobs])
     message = model.invoke([SystemMessage(prompts.render(prompts.FETCH_JOBS_SYSTEM)), HumanMessage(_build_prompt(state))])
     calls += 1
-    
-    assert profile is not None, "fetch_jobs requires profile to already be set"
-    location = profile.locations[0] if profile.locations else None
 
     if message.tool_calls:
         if len(message.tool_calls) > 1:

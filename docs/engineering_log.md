@@ -786,7 +786,17 @@ Seen in that run, not fixed: after "Not enough strong matches, trying 'data arch
 
 **Bug found, not fixed: the company research never reaches the tailor.** `tailor.py` passed `research=...` into the prompt, but the tailor prompt has no `{research}` placeholder, and `.format` silently ignores extra values. So with Tavily on (it is), every tailoring run pays for a company-research call and throws the result away, while `tailor_research_rule` tells the model to use "the company research below" — which isn't there. The migration keeps behaviour identical (the unused value is simply no longer passed, with a comment). Fix: add a `Company research:\n{{research}}` section to `tailor_application` in Opik and pass `research=` again; `render()` will refuse to run if only one half is done. It changes tailoring output, so it needs a tailor-batch re-run.
 
-Also noticed: in the earlier live searches, the reformulation round said "trying 'data architect'" but `fetch_jobs` searched for 'data engineer' again. `fetch_jobs_system` tells the model to search the candidate's *current role*, while `_build_prompt` asks it to use the broader query, and the system message wins. Likely the cause of the "reformulation adds 0 new jobs" bug.
+## 2026-10-11 · A reformulation round searched the old title again
+
+**Symptom.** Seen in every live search through the frontend: "Not enough strong matches, trying 'data architect'", then "Searched for 'data engineer': 20 jobs so far". The third round repeated the same search and added **0 new jobs**: about 10 s and an LLM call, job-board calls and a ranking pass for nothing.
+
+**Root cause.** `reformulate_query` set `search_query = "data architect"` correctly. But `fetch_jobs` never searched `state["search_query"]`: it only added a sentence to its LLM message ("Use this broader query and search again: 'data architect'"), let the LLM write the query, searched whatever the LLM returned, and wrote *that* back to `search_query`, overwriting the reformulation. Tested in isolation on the round-2 inputs for the `data_engineer` profile: `gpt-4.1-nano` ignored the suggestion **5 of 5 times** and wrote "Data Engineer", exactly what it writes in round 1. (Whether the system prompt's "current role, NOTHING else" or the small model is to blame was not isolated; the fix makes it irrelevant.) The overwrite also made `reformulate_query` see "data engineer" as the previous query again, so it suggested "data architect" a second time.
+
+**Fix.** In a reformulation round, `fetch_jobs` searches the reformulated title directly, with no LLM call; the country comes from the location, as every job source already does when none is given. The now-unused suggestion sentence is removed from `_build_prompt`. Pinned by `TestReformulationRound` in `tests/test_fetch_query.py` (searches exactly the reformulated query, makes no LLM call).
+
+**Result.** Same search as before (`data_engineer`, Bengaluru + remote): round 2 now searched **'Data Architect'** and added **10 new jobs** (10 → 20), and saved one LLM call per reformulation round. 37 tests pass.
+
+**Still open: round 3 went back to the first title.** `reformulate_query` suggested 'Data Engineer' (round 1's title), so round 3 again added 0 jobs. Its prompt is given only the *last* query (`previous_query`), so it can't know 'Data Engineer' was already tried, and the natural "broader" neighbour of Data Architect is Data Engineer. Fix: keep the list of titles already searched, show it to the prompt as "don't repeat", and if the model still returns one of them, end the loop instead of searching it again.
 
 ## Known limitations (not yet fixed)
 
