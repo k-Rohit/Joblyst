@@ -769,6 +769,25 @@ Checked on `data_engineer.pdf`: the profile screen lists "Data Engineer, Philips
 
 Seen in that run, not fixed: after "Not enough strong matches, trying 'data architect'", the next `fetch_jobs` reported "Searched for 'data engineer'", and the third round added 0 new jobs (20 → 20). Either `fetch_jobs` ignores the reformulated query or reports the wrong one in `search_query`. Needs a look in `fetch_jobs.py`.
 
+## 2026-10-11 · Prompts now live only in Opik
+
+**Why.** The prompt text sat in `src/joblyst/prompts/*.py` and in `fetch_jobs.py`; `register_prompts()` only *copied* it into Opik's library. Opik is meant to be where prompts are edited and versioned, so the repo was the wrong source of truth: an edit in Opik changed nothing the app ran.
+
+**What.** All 8 prompts are in Opik's library, project `joblyst`: `extract_profile`, `extract_job_fields`, `rank_jobs`, `reformulate`, `tailor_application`, `tailor_research_rule` (the one-line rule added to the tailor prompt when research exists), `drift_check`, and `fetch_jobs_system` (the system message that used to be `_SYSTEM` in `fetch_jobs.py`). The six prompt files and `register_prompts()` are deleted; `joblyst/prompts/__init__.py` now only holds the names and three functions: `get`, `render`, `load_all`. Decisions, made with the user:
+- *Always the latest version.* No pinned commits. Opik's SDK caches each prompt in memory and refreshes it in the background every 300 s (`OPIK_PROMPT_CACHE_TTL_SECONDS`), so an edit in Opik reaches a running server within about 5 minutes, no restart. If Opik goes down while running, a failed refresh is only logged and the cached copy stays in use (read in the SDK's `prompt_cache.py`).
+- *Fail loudly at startup.* The cache is in memory only, so a process starting while Opik is unreachable has no prompts at all. `load_all()` runs in the API's `lifespan` and at Streamlit start, and refuses to start with a clear error. Tests and scripts need `OPIK_API_KEY`; no local copy is kept, by choice.
+- *Placeholders changed from `{name}` to mustache `{{name}}`.* The copies already in Opik used Python's single braces, which Opik's `format()` and playground don't see as variables. None of the prompts contained literal braces, so the conversion was safe.
+
+**Two traps found on the way.**
+- Opik's template leaves an unfilled `{{name}}` in the text instead of raising, so a typo'd variable would send the bare placeholder to the LLM. Python's `.format` raised on that. `render()` restores the strictness both ways: a missing value **or** a value with no placeholder raises `PromptUnavailableError`. Checked: Opik does **not** HTML-escape values (quotes, `&`, `<b>`, braces pass through unchanged), so nothing in a CV gets mangled.
+- That strict check immediately exposed a real bug, below.
+
+**Result.** For every prompt, the text rendered from Opik is **character-for-character identical** to what the old code produced (9 cases, including both research-rule branches, with values full of quotes, `&`, braces, `{{`, newlines). Each prompt read back from Opik equals what was uploaded. Startup with no `OPIK_API_KEY`, and with a wrong key: the server refuses to start, naming the problem ("Opik is not configured" / "API key is incorrect"). `load_all()` adds about **6 s** to startup (8 sequential fetches); renders after that are served from the cache (100 renders in 0.085 s). 36 tests pass, ruff clean. The evals now link experiments to `prompts.get(...)`, the version actually run.
+
+**Bug found, not fixed: the company research never reaches the tailor.** `tailor.py` passed `research=...` into the prompt, but the tailor prompt has no `{research}` placeholder, and `.format` silently ignores extra values. So with Tavily on (it is), every tailoring run pays for a company-research call and throws the result away, while `tailor_research_rule` tells the model to use "the company research below" — which isn't there. The migration keeps behaviour identical (the unused value is simply no longer passed, with a comment). Fix: add a `Company research:\n{{research}}` section to `tailor_application` in Opik and pass `research=` again; `render()` will refuse to run if only one half is done. It changes tailoring output, so it needs a tailor-batch re-run.
+
+Also noticed: in the earlier live searches, the reformulation round said "trying 'data architect'" but `fetch_jobs` searched for 'data engineer' again. `fetch_jobs_system` tells the model to search the candidate's *current role*, while `_build_prompt` asks it to use the broader query, and the system message wins. Likely the cause of the "reformulation adds 0 new jobs" bug.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

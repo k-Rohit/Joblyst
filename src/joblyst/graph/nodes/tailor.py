@@ -12,12 +12,12 @@ Guards never raise: a missing search state or an unknown job id is recorded in
 
 from __future__ import annotations
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.corpus import build_corpus
 from joblyst.graph.nodes.rank_jobs import _render_profile
 from joblyst.graph.state import AgentState
 from joblyst.llm import ensure_budget, get_chat_model
-from joblyst.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
 from joblyst.schemas.schemas import RankedJob, TailoringPack
 from joblyst.tools.research import research_company
 
@@ -68,12 +68,14 @@ def tailor(state: AgentState) -> dict:
     
     model = get_chat_model(settings.joblyst_model, temperature=0.3).with_structured_output(TailoringPack)
     
-    prompt = TAILOR_PROMPT.format(
-        research_rule=RESEARCH_RULE if research else "",
+    # `research` is not passed: the tailor prompt has no {{research}} placeholder,
+    # so the company research has never reached the model (see engineering log).
+    prompt = prompts.render(
+        prompts.TAILOR,
+        research_rule=prompts.render(prompts.TAILOR_RESEARCH_RULE) if research else "",
         profile=_render_profile(profile),
         corpus=corpus.render_for_prompt(),
         job=_render_job(ranked),
-        research=research or "none",
     )
     
     pack: TailoringPack = model.invoke(prompt) #type: ignore

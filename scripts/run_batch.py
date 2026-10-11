@@ -29,13 +29,12 @@ from joblyst.profile import extract_profile
 from joblyst.runner import run_search
 from joblyst.schemas.schemas import Profile
 from joblyst.tools.cv_reader import extract_cv_content
-from joblyst.tracing import register_prompts
 
 _CV_DIR = Path(__file__).parent.parent / "data" / "fixture_cvs"
 REPORT_PATH = Path(__file__).parent.parent / "reports" / "baseline.json"
 
 # Dev cache only, not the golden dataset — regenerate anytime by deleting this
-# file (e.g. after changing EXTRACT_PROFILE_PROMPT, since a stale cache would
+# file (e.g. after changing the extract_profile prompt in Opik, since a stale cache would
 # silently hide the effect of a prompt change).
 _PROFILE_CACHE_PATH = Path(__file__).parent.parent / "data" / "fixture_profiles_cache.json"
 
@@ -190,7 +189,6 @@ def main() -> None:
         print("\nRe-run with --yes to execute.")
         sys.exit(0)
 
-    register_prompts()  # so this batch's traces sit against the current prompt versions
     cv_texts, profiles = _load_cvs_and_profiles(_CV_DIR, _PROFILE_CACHE_PATH)
     report = run(cases, cv_texts, profiles)
 

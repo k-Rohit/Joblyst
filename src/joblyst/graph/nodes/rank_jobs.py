@@ -13,10 +13,10 @@ import contextvars
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.graph.state import AgentState
 from joblyst.llm import ensure_budget, get_chat_model
-from joblyst.prompts.rank_jobs import RANK_JOBS_PROMPT
 from joblyst.schemas.schemas import JobPosting, JobScores, Profile, RankedJob
 
 MAX_PARALLEL_BATCHES = 4
@@ -100,7 +100,7 @@ def rank_jobs(state: AgentState) -> dict:
     assert rendered_profile, "rank_jobs: profile rendered empty — refusing to rank blind"
 
     def score_batch(batch: list[JobPosting]) -> JobScores:
-        prompt = RANK_JOBS_PROMPT.format(profile=rendered_profile, jobs=_render_jobs(batch))  # type:ignore
+        prompt = prompts.render(prompts.RANK_JOBS, profile=rendered_profile, jobs=_render_jobs(batch))
         return model.invoke(prompt)  # type:ignore
 
     # Batches are independent, so they run concurrently — ranking latency is the

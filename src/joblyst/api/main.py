@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile, statu
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from joblyst import prompts
 from joblyst.api import sessions
 from joblyst.api.schemas import (
     ExternalJobRequest,
@@ -42,6 +43,9 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
+    # Prompts live in Opik. Fetch them all now, so a missing one stops the server
+    # here with a clear error instead of failing a user's first request.
+    prompts.load_all()
     open_pool()
     # Build the graph now that the database is open, so it saves to Postgres.
     get_compiled_graph()

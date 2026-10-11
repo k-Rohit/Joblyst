@@ -12,9 +12,9 @@ from uuid import uuid4
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.llm import get_chat_model
-from joblyst.prompts.extract_external_job import EXTRACT_JOB_PROMPT
 from joblyst.schemas.schemas import JobPosting
 
 
@@ -29,7 +29,7 @@ def extract_external_job(job_text: str) -> JobPosting:
     """Extract structured fields from pasted job text and build a JobPosting."""
     settings = get_settings()
     model = get_chat_model(settings.joblyst_fetch_model, temperature=0.0).with_structured_output(_ExternalJobSchema)
-    fields: _ExternalJobSchema = model.invoke([SystemMessage(EXTRACT_JOB_PROMPT.format(job_text=job_text))])  # type: ignore
+    fields: _ExternalJobSchema = model.invoke([SystemMessage(prompts.render(prompts.EXTRACT_JOB, job_text=job_text))])  # type: ignore
 
     return JobPosting(
         job_id=f"external-{uuid4().hex[:8]}",

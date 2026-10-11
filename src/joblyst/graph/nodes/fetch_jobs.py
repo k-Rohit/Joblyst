@@ -12,6 +12,7 @@ import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.graph.state import AgentState
 from joblyst.llm import ensure_budget, get_chat_model
@@ -19,23 +20,6 @@ from joblyst.schemas.schemas import JobPosting, Profile
 from joblyst.tools.search_job import run_search, search_jobs
 
 MERGED_CEILING = 25  # caps the TOTAL accumulated across reformulation loops, not any single search
-
-_SYSTEM = (
-    "You are a job search assistant. Call the search_jobs tool exactly once.\n"
-    "The query goes verbatim to job boards, which match it against job TITLES. "
-    "So write it as a job title someone would actually post: the candidate's "
-    "current role at the right seniority, and NOTHING else. Two to four words.\n"
-    "Never append skills, technologies, tools or synonyms. Every extra term "
-    "narrows the match, and a long query returns nothing at all.\n"
-    "Search for ONE role only. Boards match the query against a single title, so "
-    "a list matches nothing: no 'OR', no 'AND', no commas, no slashes. If the "
-    "candidate has held several roles, pick the one title that best describes "
-    "them now.\n"
-    "Bad:  'data analyst OR business analyst' · 'data engineer, data scientist'\n"
-    "Good: 'senior data scientist' · 'machine learning engineer' · 'staff backend engineer'\n"
-    "Bad:  'senior data scientist AI engineer deep learning LLMs RAG vector databases'\n"
-    "Pick a country code from their location and set the remote flag from their preference."
-)
 
 # A prompt is a request, not a guarantee, so the constraint is also enforced
 # here. Real titles run 2-4 words; 6 leaves room for "(all genders)"-style
@@ -90,7 +74,7 @@ def fetch_jobs(state: AgentState) -> dict:
     # arguments is a trivial call.
     model_name = settings.joblyst_fetch_model
     model = get_chat_model(model_name, temperature=0.0).bind_tools([search_jobs])
-    message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
+    message = model.invoke([SystemMessage(prompts.render(prompts.FETCH_JOBS_SYSTEM)), HumanMessage(_build_prompt(state))])
     calls += 1
     
     assert profile is not None, "fetch_jobs requires profile to already be set"

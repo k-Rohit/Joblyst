@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.llm import get_chat_model
-from joblyst.prompts.extact_profile_prompt import EXTRACT_PROFILE_PROMPT
 from joblyst.schemas.schemas import Profile
 from joblyst.tracing import get_tracer
 
@@ -27,7 +27,8 @@ def extract_profile(
     # "October 2023"), so every "2022 - Present" range was being computed against
     # that year and understated by ~3 years. Passing the real date fixes it and
     # cannot go stale.
-    prompt = EXTRACT_PROFILE_PROMPT.format(
+    prompt = prompts.render(
+        prompts.EXTRACT_PROFILE,
         cv_text=cv_text, today=datetime.now(UTC).date().isoformat()
     )
     profile: Profile = llm.invoke(prompt, config=config)  # type: ignore

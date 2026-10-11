@@ -6,11 +6,11 @@ Increments the reformulation counter (the loop guard) and writes a new
 
 from __future__ import annotations
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.graph.nodes.fetch_jobs import _trim_query
 from joblyst.graph.state import AgentState
 from joblyst.llm import ensure_budget, get_chat_model
-from joblyst.prompts.reformulate import REFORMULATE_PROMPT
 
 
 def reformulate_query(state: AgentState) -> dict:
@@ -22,7 +22,8 @@ def reformulate_query(state: AgentState) -> dict:
     # extract_profile always runs before the graph starts, so this should never fire
     assert profile is not None, "reformulate_query requires profile to already be set"
 
-    prompt = REFORMULATE_PROMPT.format(
+    prompt = prompts.render(
+        prompts.REFORMULATE,
         profile=", ".join(profile.primary_roles + profile.skills[:10]),
         previous_query=state.get("search_query") or "",
     )

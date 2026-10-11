@@ -27,10 +27,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from joblyst import prompts
 from joblyst.config import get_settings
 from joblyst.corpus import CandidateCorpus
 from joblyst.llm import get_chat_model
-from joblyst.prompts.drift_check import DRIFT_CHECK_PROMPT
 from joblyst.schemas.schemas import FabricationReport, FlaggedClaim, TailoringPack
 from joblyst.validation import (
     _looks_factual,
@@ -84,7 +84,7 @@ def _run_drift_checks(survivors: list[_Survivor]) -> list[FlaggedClaim]:
         .with_retry(stop_after_attempt=JUDGE_MAX_ATTEMPTS, wait_exponential_jitter=True)
     )
     prompts = [
-        DRIFT_CHECK_PROMPT.format(rewrite=s.text, sources="\n".join(f"- {src}" for src in s.sources))
+        prompts.render(prompts.DRIFT_CHECK, rewrite=s.text, sources="\n".join(f"- {src}" for src in s.sources))
         for s in survivors
     ]
     results: list[_DriftCheck] = model.batch(prompts, config={"max_concurrency": JUDGE_MAX_CONCURRENCY})  # type: ignore[assignment]

@@ -21,14 +21,13 @@ import statistics
 import sys
 from pathlib import Path
 
+from joblyst import prompts
 from joblyst.config import get_settings
-from joblyst.tracing import configure_opik, register_prompts
+from joblyst.tracing import configure_opik
 
 REPORT_DIR = Path(__file__).resolve().parent.parent / "reports"
 RANKING_DATASET = "joblyst-ranking-cases"
-RANKING_PROMPT_NAME = "rank_jobs"
 EXTRACTION_DATASET = "joblyst-extraction-cases"
-EXTRACTION_PROMPT_NAME = "extract_profile"
 
 
 def _client():
@@ -47,10 +46,9 @@ def run_ranking(limit: int | None) -> None:
     from joblyst.graph.nodes.rank_jobs import rank_jobs
     from joblyst.schemas.schemas import JobPosting, Profile
 
-    register_prompts()  # so the prompt version linked below is the one on disk
     client = _client()
     dataset = client.get_dataset(name=RANKING_DATASET)
-    prompt = client.get_prompt(name=RANKING_PROMPT_NAME)
+    prompt = prompts.get(prompts.RANK_JOBS)  # the version this experiment ran with
 
     def task(item: dict) -> dict:
         job = JobPosting(
@@ -134,10 +132,9 @@ def run_extraction(limit: int | None, model: str | None = None) -> None:
     from evals.metrics import ProfileFieldAccuracy
     from joblyst.profile import extract_profile
 
-    register_prompts()  # so the prompt version linked below is the one on disk
     client = _client()
     dataset = client.get_dataset(name=EXTRACTION_DATASET)
-    prompt = client.get_prompt(name=EXTRACTION_PROMPT_NAME)
+    prompt = prompts.get(prompts.EXTRACT_PROFILE)  # the version this experiment ran with
 
     def task(item: dict) -> dict:
         # thread_id=None: no tracer, so this doesn't create its own thread —

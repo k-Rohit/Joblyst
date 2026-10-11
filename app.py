@@ -13,17 +13,18 @@ from uuid import uuid4
 
 import streamlit as st
 
+from joblyst import prompts
 from joblyst.profile import extract_profile
 from joblyst.runner import run_external_job, run_search, run_tailor
 from joblyst.schemas.schemas import RankedJob
 from joblyst.tools.cv_reader import extract_cv_content
-from joblyst.tracing import opik_url, register_prompts
+from joblyst.tracing import opik_url
 
 st.set_page_config(page_title="Joblyst 💼", layout="wide", page_icon="💼")
 
-if "prompts_registered" not in st.session_state:
-    register_prompts()  # version any prompt edits in Opik's prompt library
-    st.session_state.prompts_registered = True
+if "prompts_loaded" not in st.session_state:
+    prompts.load_all()  # prompts live in Opik; stop here with a clear error if any is missing
+    st.session_state.prompts_loaded = True
 
 # --- session state -----------------------------------------------------
 if "thread_id" not in st.session_state:
