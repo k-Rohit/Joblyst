@@ -26,8 +26,10 @@ class AgentState(TypedDict):
     tailoring: TailoringPack | None
     selected_job_id: str | None
     external_job_text: str | None
-    ## added for the purpose of that sometimes a person may want to swtich domain/field.
+    # added for the purpose of that sometimes a person may want to swtich domain/field.
     target_role: str | None
+    # this list will contain the history of all the queries that has been used by the agent to search the job boards.
+    searched_queries: list
     research_notes: str | None
     fabrication_flags: int
     fabrication_report: FabricationReport | None
