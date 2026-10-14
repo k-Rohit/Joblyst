@@ -29,7 +29,7 @@ class AgentState(TypedDict):
     # added for the purpose of that sometimes a person may want to swtich domain/field.
     target_role: str | None
     # this list will contain the history of all the queries that has been used by the agent to search the job boards.
-    searched_queries: list
+    searched_queries: list[str]
     research_notes: str | None
     fabrication_flags: int
     fabrication_report: FabricationReport | None

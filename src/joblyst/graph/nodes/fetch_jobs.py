@@ -6,6 +6,7 @@ search runs with those arguments and the results land in state. On a
 reformulation loop the reformulated query is passed as guidance for a fresh call.
 
 """
+
 from __future__ import annotations
 
 import re
@@ -19,7 +20,9 @@ from joblyst.llm import ensure_budget, get_chat_model
 from joblyst.schemas.schemas import JobPosting, Profile
 from joblyst.tools.search_job import run_search, search_jobs
 
-MERGED_CEILING = 25  # caps the TOTAL accumulated across reformulation loops, not any single search
+MERGED_CEILING = (
+    25  # caps the TOTAL accumulated across reformulation loops, not any single search
+)
 
 # A prompt is a request, not a guarantee, so the constraint is also enforced
 # here. Real titles run 2-4 words; 6 leaves room for "(all genders)"-style
@@ -30,11 +33,12 @@ MAX_QUERY_WORDS = 6
 # roles". Not slash or ampersand — "AI/ML engineer", "R&D engineer" are real titles.
 _QUERY_SEPARATORS = re.compile(r"\s+(?:or|and)\s+|\s*[,;|]\s*", re.IGNORECASE)
 
+
 def _build_prompt(state: AgentState) -> str:
-    """ Describe the candidate to the LLM: the HumanMessage for the first search.
+    """Describe the candidate to the LLM: the HumanMessage for the first search.
     Reformulation rounds don't use it; they search the reformulated query directly.
     """
-    profile = state['profile']
+    profile = state["profile"]
     # extract_profile always runs before the graph starts, so this should never fire
     assert profile is not None, "fetch_jobs requires profile to already be set"
     lines = [
@@ -44,7 +48,7 @@ def _build_prompt(state: AgentState) -> str:
         f"Summary: {profile.raw_summary or 'n/a'}",
         f"Locations: {', '.join(profile.locations) or 'unknown'}",
         f"Open to remote: {profile.remote_ok}",
-]
+    ]
     if state.get("target_role"):
         lines.append(
             f"\nThe candidate's past job titles are {', '.join(profile.primary_roles) or 'unclear'}, "
@@ -59,7 +63,7 @@ def _build_prompt(state: AgentState) -> str:
 def fetch_jobs(state: AgentState) -> dict:
     """Run the job search with LLM-chosen arguments and merge results into state."""
     settings = get_settings()
-    calls = state.get("llm_calls",0)
+    calls = state.get("llm_calls", 0)
     profile = state["profile"]
     errors = list(state.get("errors", []))
     assert profile is not None, "fetch_jobs requires profile to already be set"
@@ -74,17 +78,33 @@ def fetch_jobs(state: AgentState) -> dict:
         # country is derived from the location by each job source.
         query = reformulated
         jobs, sources = run_search(
-            query=query, location=location, country=None, remote=profile.remote_ok, limit=settings.joblyst_max_jobs
+            query=query,
+            location=location,
+            country=None,
+            remote=profile.remote_ok,
+            limit=settings.joblyst_max_jobs,
         )
         jobs = _dedupe_with_existing(state.get("jobs", []), jobs)[:MERGED_CEILING]
-        return {"jobs": jobs, "search_query": query, "jobs_sources": sources, "errors": errors, "llm_calls": calls}
+        return {
+            "jobs": jobs,
+            "search_query": query,
+            "searched_queries": state.get("searched_queries", []) + [query],
+            "jobs_sources": sources,
+            "errors": errors,
+            "llm_calls": calls,
+        }
 
-    ensure_budget(calls,1,settings.max_llm_calls_per_run)
+    ensure_budget(calls, 1, settings.max_llm_calls_per_run)
     # Choosing a small and faster model here as selecting tool
     # arguments is a trivial call.
     model_name = settings.joblyst_fetch_model
     model = get_chat_model(model_name, temperature=0.0).bind_tools([search_jobs])
-    message = model.invoke([SystemMessage(prompts.render(prompts.FETCH_JOBS_SYSTEM)), HumanMessage(_build_prompt(state))])
+    message = model.invoke(
+        [
+            SystemMessage(prompts.render(prompts.FETCH_JOBS_SYSTEM)),
+            HumanMessage(_build_prompt(state)),
+        ]
+    )
     calls += 1
 
     if message.tool_calls:
@@ -107,12 +127,19 @@ def fetch_jobs(state: AgentState) -> dict:
                 # Visible in the trace rather than silent: a query that needed
                 # trimming is the early warning that the sources are about to
                 # return nothing and the fallback board is about to fill in.
-                errors.append(f"fetch_jobs: query cut back to a single title, dropped {dropped!r}")
+                errors.append(
+                    f"fetch_jobs: query cut back to a single title, dropped {dropped!r}"
+                )
             country = args.get("country")
             remote = bool(args.get("remote", profile.remote_ok))
-            query = query or call_query  # the state's search_query is the first call's, for reformulation messaging
+            query = query or call_query  # the state's search_query is the first call's
+
             call_jobs, call_sources = run_search(
-                query=call_query, location=location, country=country, remote=remote, limit=settings.joblyst_max_jobs
+                query=call_query,
+                location=location,
+                country=country,
+                remote=remote,
+                limit=settings.joblyst_max_jobs,
             )
             jobs = _dedupe_with_existing(jobs, call_jobs)
             sources.extend(s for s in call_sources if s not in sources)
@@ -120,18 +147,24 @@ def fetch_jobs(state: AgentState) -> dict:
         errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
         query = _fallback_query(profile)
         jobs, sources = run_search(
-            query=query, location=location, country=None, remote=profile.remote_ok, limit=settings.joblyst_max_jobs
+            query=query,
+            location=location,
+            country=None,
+            remote=profile.remote_ok,
+            limit=settings.joblyst_max_jobs,
         )
 
     jobs = _dedupe_with_existing(state.get("jobs", []), jobs)[:MERGED_CEILING]
-    
+
     return {
         "jobs": jobs,
         "search_query": query,
+        "searched_queries": state.get("searched_queries", []) + [query],
         "jobs_sources": sources,
         "errors": errors,
         "llm_calls": calls,
     }
+
 
 def _fallback_query(profile: Profile) -> str:
     """The query to search when the LLM supplies none.
@@ -175,7 +208,10 @@ def _trim_query(query: str) -> tuple[str, str]:
 
     return kept, " ".join(dropped)
 
-def _dedupe_with_existing(existing: list[JobPosting], new: list[JobPosting]) -> list[JobPosting]:
+
+def _dedupe_with_existing(
+    existing: list[JobPosting], new: list[JobPosting]
+) -> list[JobPosting]:
     """On a reformulation loop, merge new results with prior ones, deduped."""
     seen = {(j.title.strip().lower(), j.company.strip().lower()) for j in existing}
     merged = list(existing)
@@ -185,7 +221,3 @@ def _dedupe_with_existing(existing: list[JobPosting], new: list[JobPosting]) -> 
             seen.add(key)
             merged.append(job)
     return merged
-        
-    
-    
-    

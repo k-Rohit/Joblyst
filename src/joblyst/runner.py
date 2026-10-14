@@ -63,6 +63,7 @@ def _search_inputs(profile: Profile, cv_text: str, target_role: str | None) -> d
         "ranked_jobs": [],
         "jobs_sources": [],
         "search_query": None,
+        "searched_queries": [],
         "reformulation_count": 0,
         "llm_calls": 0,
         "errors": [],
