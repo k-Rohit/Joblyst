@@ -164,6 +164,9 @@ Candidate corpus:
 
 Target job:
 {{job}}
+
+Company research:
+{{research}}
 """
 
 TAILOR_RESEARCH_RULE = """- Company facts in the cover letter may only come from the company research below."""

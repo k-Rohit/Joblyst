@@ -15,6 +15,7 @@ against a workspace where prompts were edited in Opik can't undo those edits.
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -94,9 +95,11 @@ def pull() -> int:
     """Rewrite prompts/prompts.py with the latest text from Opik, keeping its header."""
     client = _client()
     source = PROMPTS_FILE.read_text()
-    header = source[: source.index("# fmt: off")]
+    # The header is the file's opening docstring; ast says exactly where it ends.
+    docstring_end = ast.parse(source).body[0].end_lineno
+    header = "\n".join(source.splitlines()[:docstring_end]) + "\n"
     names = list(_load_file())
-    lines = [header + "# fmt: off\n"]
+    lines = [header]
     constants = {}
     for name in names:
         text = _in_opik(client, name)

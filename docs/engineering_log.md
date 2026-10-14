@@ -812,6 +812,16 @@ Seen in that run, not fixed: after "Not enough strong matches, trying 'data arch
 
 **Result.** `seed_prompts.py` against the author's workspace: 8 of 8 "same", nothing to push. Against an empty project: 8 of 8 "missing → will create", nothing written without `--yes`. Empty `DATABASE_URL`: pool not opened, server uses memory. `.env.example` parses. Tests pass with no Opik key (36). The README now leads with setup steps for macOS, Linux and Windows and a baseline → now summary grouped by type of optimisation.
 
+## 2026-10-14 · The company research never reached the tailor prompt
+
+**Symptom.** Found during the Opik prompt migration (2026-10-11): with Tavily on, every tailoring run called `research_company()`, added the rule "Company facts in the cover letter may only come from the company research below", and then put nothing below it. The 2026-10-03 batch's real fabrications included invented facts about the hiring company ("Time Hack Consulting's innovative approach in the fintech space"), which fits a writer told to use research it can't see.
+
+**Root cause.** `tailor.py` passed `research=...` to `TAILOR_PROMPT.format(...)`, but the prompt had no `{research}` placeholder, and `.format` silently drops unused values. The research did go to the state as `research_notes`, which `validate_tailoring` uses as an allowed source. So the *checker* saw the research and the *writer* didn't.
+
+**Fix.** A new version of `tailor_application` in Opik (commit `4a55c736`) ends with `Company research:\n{{research}}`; `tailor.py` passes `research=research or "none"`. `render()` raises if the prompt and the code disagree, so they can't drift apart silently again. `prompts/prompts.py` refreshed with `seed_prompts.py --pull`; that also exposed that `--pull` depended on a `# fmt: off` marker line that had been removed, so it now finds the end of the file's docstring with `ast` instead.
+
+**Result.** Checked on a real call: Tavily returned 1,504 characters about Fragma Data Systems, and that text now appears under "Company research:" in the rendered prompt. 36 tests pass. **Not measured:** the effect on the fabrication rate. The expectation is fewer invented company facts in cover letters; confirming it needs a tailoring batch run (`scripts/run_tailor_batch.py --yes`, about $0.40), which was skipped for now.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

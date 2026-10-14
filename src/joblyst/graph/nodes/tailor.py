@@ -68,14 +68,13 @@ def tailor(state: AgentState) -> dict:
     
     model = get_chat_model(settings.joblyst_model, temperature=0.3).with_structured_output(TailoringPack)
     
-    # `research` is not passed: the tailor prompt has no {{research}} placeholder,
-    # so the company research has never reached the model (see engineering log).
     prompt = prompts.render(
         prompts.TAILOR,
         research_rule=prompts.render(prompts.TAILOR_RESEARCH_RULE) if research else "",
         profile=_render_profile(profile),
         corpus=corpus.render_for_prompt(),
         job=_render_job(ranked),
+        research=research or "none",
     )
     
     pack: TailoringPack = model.invoke(prompt) #type: ignore
