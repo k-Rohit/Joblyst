@@ -45,25 +45,79 @@ And it's **measured**. Every part of the pipeline that an LLM touches has an eva
 
 ## 🏗️ Architecture
 
+### System overview
+
+```mermaid
+flowchart LR
+    user([User]) --> web["Next.js web app"]
+    web -- "REST + live events" --> api
+
+    subgraph backend ["Backend"]
+        api["FastAPI"] --> agent["LangGraph agent"]
+    end
+
+    subgraph state ["Where state lives"]
+        pg[("Postgres<br/>sessions + checkpoints")]
+        opik[("Opik<br/>prompts · traces · evals")]
+    end
+
+    subgraph external ["External services"]
+        openai["OpenAI"]
+        boards["5 job boards"]
+        tavily["Tavily"]
+    end
+
+    api -- "sessions" --> pg
+    agent -- "checkpoints" --> pg
+    opik -- "prompts" --> api
+    agent -- "traces" --> opik
+    agent --> openai
+    agent --> boards
+    agent --> tavily
+```
+
+Four parts, each with one job:
+
+- **Next.js web app:** the four screens (upload, preferences, live search, tailored CV). It holds no state except the `thread_id` it got back from the upload.
+- **FastAPI backend:** stateless. Every request carries the `thread_id`, and everything it needs is loaded from Postgres, so a restart or a second server process loses nothing.
+- **LangGraph agent:** the search, ranking and tailoring logic, as a graph of nodes that share one typed state.
+- **Postgres** stores two things: the **session** (CV text and extracted profile, written at upload and kept 7 days) and the agent's **checkpoints** (its state after every step, so tailoring can read the ranked jobs a search produced). **Opik** holds the prompts, every trace, and the eval datasets and experiments.
+
+### What happens on each request
+
+| User step | Endpoint | What runs | What's stored |
+|---|---|---|---|
+| Upload CV | `POST /api/profile` | PDF → text (pypdf), then an LLM extracts a typed `Profile` | session row; returns a new `thread_id` |
+| Search | `POST /api/search/stream` | agent: `fetch_jobs → rank_jobs`, broadening the search up to twice; each step is streamed to the browser as it finishes | checkpoint on the thread |
+| Pick a job | `POST /api/tailor` | agent: `tailor → validate_tailoring`, reading the ranked jobs from the checkpoint | checkpoint |
+| …or paste one | `POST /api/external-job` | agent: `score_external_job → tailor → validate_tailoring` | checkpoint |
+| Download | `GET /api/tailor/{thread_id}/pdf` | renders the last tailored CV from the checkpoint (fpdf2) | — |
+
+One `thread_id` ties it all together: the session row, the agent's checkpoints and the Opik trace thread all use it, so one user's whole journey shows up as one thread in Opik.
+
+### The agent graph
+
 <div align="center">
 <img src="docs/images/graph.png" alt="Joblyst LangGraph graph" width="480">
 </div>
 
 <sub>Rendered directly from the compiled graph (`get_compiled_graph().get_graph().draw_mermaid_png()`) — this is the actual topology, so it can't drift from the code.</sub>
 
-Profile extraction runs once, before the graph. Three ways in, decided by `route_entry`: pasted job text → `score_external_job`; a `selected_job_id` → `tailor`; otherwise a normal search. `fetch_jobs` and `rank_jobs` loop through `reformulate_query` up to twice if too few jobs clear the fit bar, and every tailoring path ends in `validate_tailoring`.
+Profile extraction runs once, before the graph. Three ways in, decided by `route_entry`: pasted job text → `score_external_job`; a `selected_job_id` → `tailor`; otherwise a normal search. `fetch_jobs` and `rank_jobs` loop through `reformulate_query` up to twice if fewer than 5 jobs score 60 or more, and every tailoring path ends in `validate_tailoring`.
 
 One `StateGraph`, one checkpointer, three entry points — a search and a tailoring run share one thread, so tailoring reads the profile and ranked jobs straight from the checkpoint. Nothing re-runs.
 
-Around the graph:
+### Design decisions
 
-```
-Next.js web app  ──HTTP / live events──▶  FastAPI  ──▶  LangGraph agent  ──▶  OpenAI, job boards, Tavily
-                                             │                 │
-                                             ▼                 ▼
-                                  Postgres: sessions +    Opik: prompts, traces,
-                                  graph checkpoints       eval experiments
-```
+| Decision | Why |
+|---|---|
+| **Sessions are separate from checkpoints** | Profile extraction happens at upload, before the graph has ever run, so there's no checkpoint to keep it in yet. "Upload, then paste a job" never runs a search at all. |
+| **Live progress over SSE**, and the 404 check runs *before* the stream | A search takes 30–60 s, so the user sees each step. Once a stream starts, "200 OK" is already sent, so an unknown `thread_id` is rejected in a FastAPI dependency first, which keeps it a real 404. |
+| **Prompts live in Opik, not in code** | A prompt can be edited and versioned without a deploy, and each eval run records the exact prompt version it used. The SDK caches them; the server refuses to start if one is missing rather than failing a user's request. |
+| **Tailoring can only reuse your CV** | The CV is split into small, verbatim pieces with ids, and every tailored bullet must cite the piece it came from, which gives the fabrication check something exact to compare against. |
+| **A stronger model judges than writes** | `gpt-4o-mini` writes the CV, `gpt-4.1` checks it; a judge no better than the writer shares its blind spots. `gpt-4.1-nano` only picks the search title, the cheapest call. |
+| **Every important prompt rule has code behind it** | A prompt is a request, not a guarantee: code cuts a list of job titles to one, caps LLM calls per run, and refuses to send a prompt with a missing value. |
+| **Preferences come from the user** | A CV records where you *have* worked, not where you want to; locations and remote are asked on the form. |
 
 ---
 
