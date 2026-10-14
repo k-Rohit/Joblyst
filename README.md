@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=26&pause=1000&color=2EA8FF&center=true&vCenter=true&width=600&lines=Joblyst;LangGraph+Job-Search+Agent;CV+%E2%86%92+Search+%E2%86%92+Rank+%E2%86%92+Tailor;Grounded.+Verified.+Never+Fabricated." alt="Joblyst" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+  <img src="docs/images/logo-light.png" alt="Joblyst" width="318">
+</picture>
 
 
 ### 🧭 An AI agent that finds jobs that actually fit — and tailors your CV without lying about it
