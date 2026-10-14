@@ -47,34 +47,10 @@ And it's **measured**. Every part of the pipeline that an LLM touches has an eva
 
 ### System overview
 
-```mermaid
-flowchart LR
-    user([User]) --> web["Next.js web app"]
-    web -- "REST + live events" --> api
-
-    subgraph backend ["Backend"]
-        api["FastAPI"] --> agent["LangGraph agent"]
-    end
-
-    subgraph state ["Where state lives"]
-        pg[("Postgres<br/>sessions + checkpoints")]
-        opik[("Opik<br/>prompts · traces · evals")]
-    end
-
-    subgraph external ["External services"]
-        openai["OpenAI"]
-        boards["5 job boards"]
-        tavily["Tavily"]
-    end
-
-    api -- "sessions" --> pg
-    agent -- "checkpoints" --> pg
-    opik -- "prompts" --> api
-    agent -- "traces" --> opik
-    agent --> openai
-    agent --> boards
-    agent --> tavily
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
+  <img src="docs/images/architecture-light.png" alt="Joblyst architecture: a Next.js web app calls a stateless FastAPI backend, which runs a LangGraph agent. State lives in Postgres (Supabase) and Opik; the agent calls OpenAI, five job boards and Tavily." width="100%">
+</picture>
 
 Four parts, each with one job:
 
