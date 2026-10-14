@@ -18,7 +18,8 @@ def open_pool():
     """Create and open the pool. Does nothing if DATABASE_URL isn't set, or if it's already open."""
     global _pool
     url = get_settings().database_url
-    if url is None or _pool is not None:
+    # An empty "DATABASE_URL=" line (as in .env.example) means no database too.
+    if url is None or not url.get_secret_value() or _pool is not None:
         return
 
     _pool = ConnectionPool(

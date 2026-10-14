@@ -798,6 +798,20 @@ Seen in that run, not fixed: after "Not enough strong matches, trying 'data arch
 
 **Still open: round 3 went back to the first title.** `reformulate_query` suggested 'Data Engineer' (round 1's title), so round 3 again added 0 jobs. Its prompt is given only the *last* query (`previous_query`), so it can't know 'Data Engineer' was already tried, and the natural "broader" neighbour of Data Architect is Data Engineer. Fix: keep the list of titles already searched, show it to the prompt as "don't repeat", and if the model still returns one of them, end the loop instead of searching it again.
 
+## 2026-10-14 · Making Joblyst runnable on someone else's machine
+
+**Why.** Rewriting the README's setup steps for a fresh machine exposed three things that only worked on the author's:
+1. **Prompts existed only in the author's Opik workspace.** A new user with their own Opik account has an empty prompt library, so `load_all()` stops the server at startup (checked against an empty project: `Prompt 'extract_profile' was not found in Opik's prompt library.`).
+2. **No schema in the repo.** With `DATABASE_URL` set, the server needs a `candidate_sessions` table that existed only in the author's Supabase project.
+3. **An empty `DATABASE_URL=` line counted as "set".** pydantic reads it as `SecretStr('')`, not `None`, so `open_pool()` tried to connect to an empty address and the server wouldn't start. `.env.example` had to contain exactly that line.
+
+**Fix.**
+1. `prompts/prompts.py` (top level, outside the app's package) holds a copy of all 8 prompts, with a header saying production reads them from Opik. Generated from Opik and checked identical. `scripts/seed_prompts.py` shows what's missing or different (no flag), creates the missing ones (`--yes`), replaces differing ones only with `--overwrite`, and refreshes the file from Opik (`--pull`). Without `--overwrite` it never touches an existing prompt, so it can't undo edits made in Opik.
+2. `schema.sql` written from the live table's definition (read from `information_schema`): `thread_id uuid` primary key, `cv_text`, `profile jsonb`, `created_at`, `expires_at` defaulting to **now + 7 days**, RLS on with no policies.
+3. `open_pool()` treats an empty URL as no database. `.env.example` gained every setting a new user needs: Adzuna, JSearch, Tavily, `DATABASE_URL`, `CORS_ORIGINS`, `JOBLYST_JUDGE_MODEL`, and a note that Opik is now required.
+
+**Result.** `seed_prompts.py` against the author's workspace: 8 of 8 "same", nothing to push. Against an empty project: 8 of 8 "missing → will create", nothing written without `--yes`. Empty `DATABASE_URL`: pool not opened, server uses memory. `.env.example` parses. Tests pass with no Opik key (36). The README now leads with setup steps for macOS, Linux and Windows and a baseline → now summary grouped by type of optimisation.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

@@ -21,7 +21,7 @@
 
 Give it your resume. It **extracts a structured profile**, asks you **where you want to work**, **searches five live job boards concurrently**, **ranks every result against you with an LLM**, and — if the first pass comes back thin — **broadens the search and tries again**. Then, for any job you pick, it **tailors your CV and writes a cover letter**, and runs every generated claim through a **fabrication checker** before you see it, so nothing it writes says something your real CV doesn't back up.
 
-It's a genuine multi-node **LangGraph agent**, not a prompt wrapper: typed state, conditional routing, checkpointed threads, per-node tracing, and a budget guard on LLM spend.
+It's a genuine multi-node **LangGraph agent**, not a prompt wrapper: typed state, conditional routing, checkpointed threads, per-node tracing, and a budget guard on LLM spend. It runs as a **FastAPI** backend with a **Next.js** web app that shows each search step live as it happens.
 
 And it's **measured**. Every part of the pipeline that an LLM touches has an eval, a frozen dataset, and a number — and most of this README is the story of what those numbers found.
 
@@ -35,7 +35,10 @@ And it's **measured**. Every part of the pipeline that an LLM touches has an eva
 - 🔁 **Self-reformulating search** — under 5 jobs scoring 60+ means the agent picks an adjacent title and searches again, capped at two retries.
 - 🧩 **Corpus-grounded tailoring** — your CV is split into small, verbatim, addressable units; every generated bullet must cite the real line it came from.
 - 🛡️ **Two-stage fabrication check** — skills are checked by exact lookup; prose is checked by an LLM judge that is deliberately stronger than the model that wrote it, and only flags what a rewrite *adds*, never what it leaves out.
-- 📈 **Full Opik tracing and versioned prompts** — every LLM and tool call traced with cost, and every prompt registered so an eval score can be tied to the exact prompt text that produced it.
+- 📈 **Opik for tracing, evals and prompts** — every LLM and tool call traced with cost; every prompt lives in Opik's prompt library, so a prompt can be edited and versioned there without touching code, and each eval run records the exact version it used.
+- ⚡ **Live progress** — the search streams each step to the browser (Server-Sent Events): "Searched for 'Data Engineer': 10 jobs… Scored 10 jobs, 1 strong match…".
+- 💾 **Sessions that survive restarts** — the uploaded CV, extracted profile and the graph's state are stored in Postgres (Supabase), so a redeploy doesn't lose anyone's work. Without a database, it falls back to memory.
+- 📄 **Download the tailored CV as a PDF**, with each rewritten line shown next to the original CV line it came from.
 
 ## 🏗️ Architecture
 
@@ -49,7 +52,137 @@ Profile extraction runs once, before the graph. Three ways in, decided by `route
 
 One `StateGraph`, one checkpointer, three entry points — a search and a tailoring run share one thread, so tailoring reads the profile and ranked jobs straight from the checkpoint. Nothing re-runs.
 
+Around the graph:
+
+```
+Next.js web app  ──HTTP / live events──▶  FastAPI  ──▶  LangGraph agent  ──▶  OpenAI, job boards, Tavily
+                                             │                 │
+                                             ▼                 ▼
+                                  Postgres: sessions +    Opik: prompts, traces,
+                                  graph checkpoints       eval experiments
+```
+
 ---
+
+## 🚀 Getting started
+
+Works on macOS, Linux and Windows. About 10 minutes the first time.
+
+### What you need
+
+| | Why | Get it |
+|---|---|---|
+| **uv** | installs Python 3.12 and every dependency | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
+| **Node.js 20.9+** | runs the web app | [nodejs.org](https://nodejs.org/) |
+| **OpenAI API key** | every LLM call | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| **Opik API key** (free) | **required**: the app reads its prompts from Opik | [comet.com](https://www.comet.com/) |
+| Job-board and Tavily keys | optional: more jobs, company research | links in `.env.example` |
+| Postgres / Supabase | optional: keeps sessions across restarts | [supabase.com](https://supabase.com/) |
+
+You don't need to install Python yourself; `uv` downloads the right version.
+
+### 1. Get the code and install
+
+```bash
+git clone https://github.com/k-Rohit/Joblyst.git
+cd Joblyst
+uv sync --all-groups
+```
+
+### 2. Add your keys
+
+```bash
+cp .env.example .env          # Windows (cmd): copy .env.example .env
+```
+
+Open `.env` and fill in at least `OPENAI_API_KEY` and `OPIK_API_KEY`. Every other setting is explained in the file and can stay empty.
+
+### 3. Put the prompts into your Opik
+
+The app doesn't keep prompts in its code; it fetches them from Opik's prompt library at startup. A new Opik account has none, so copy them in once from `prompts/prompts.py`:
+
+```bash
+uv run python scripts/seed_prompts.py          # shows what it will add
+uv run python scripts/seed_prompts.py --yes    # adds them
+```
+
+It only adds prompts your Opik doesn't have yet, so running it again never overwrites edits you made in Opik.
+
+### 4. Check the setup
+
+```bash
+uv run python scripts/check_setup.py
+```
+
+You should see `Model replied: 'setup ok'` and the trace in your Opik project.
+
+### 5. Start the backend
+
+```bash
+uv run uvicorn joblyst.api.main:app --reload --port 8000
+```
+
+Wait for `Application startup complete` (the first start takes a few seconds while it loads the prompts). If a prompt is missing or the Opik key is wrong, it stops here and says which.
+
+### 6. Start the web app (second terminal)
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local    # Windows (cmd): copy .env.example .env.local
+npm run dev
+```
+
+Open **http://localhost:3000**, upload a CV as a PDF (or try `data/fixture_cvs/data_engineer.pdf`), and follow the four steps.
+
+### Optional: keep sessions in a database
+
+Without `DATABASE_URL`, uploads and searches live in the server's memory and are lost when it restarts. To keep them:
+
+1. Create a Postgres database. On Supabase, copy the **session pooler** connection string (port 5432), and use a password with only letters and digits: characters like `@` break the URL.
+2. Run [`schema.sql`](schema.sql) once (Supabase: SQL editor).
+3. Set `DATABASE_URL` in `.env` and restart the backend. LangGraph creates its own checkpoint tables on startup.
+
+### If something goes wrong
+
+| You see | Fix |
+|---|---|
+| `Prompts are stored in Opik, but Opik is not configured` | `OPIK_API_KEY` is empty in `.env` |
+| `Could not fetch prompts from Opik: … API key is incorrect` | wrong key, or set `OPIK_WORKSPACE` |
+| `Prompt '…' was not found in Opik's prompt library` | run step 3 with `--yes` |
+| The web app shows a network or CORS error | the backend isn't on port 8000, or set `CORS_ORIGINS` in `.env` to the web app's address |
+| Every search returns few jobs | add job-board keys in `.env`; without them only the keyless boards are searched |
+
+There is also the original Streamlit test UI: `uv run streamlit run app.py`.
+
+---
+
+## 📊 Baseline → now, at a glance
+
+Every number was measured on fixed, hand-checked data. The baseline is the first measurement; "now" is after the changes below.
+
+| What's measured | Baseline | Now |
+|---|---|---|
+| Ranking: fit score on the right side of 60 (46 hand-labelled jobs) | 0.870 | **0.891** |
+| Ranking: "matched skills" really in the CV | 0.978 | **0.978** |
+| Profile extraction: field accuracy (5 hand-checked CVs) | 0.569 | **0.738** |
+| Fabrication: share of generated claims flagged (14 tailored CVs) | 0.388 | **0.104** (about **5.8%** real, read by hand) |
+
+**What changed, by type of optimisation**
+
+| Type | What I did | Effect |
+|---|---|---|
+| **Fixing the input, not the prompt** | The ranker was sent an empty profile on every normal search (one mis-indented `return`); now a blank prompt input raises instead | Every fit score before this was guessed blind |
+| **Prompt rules** | Extraction: count only *paid, relevant* years and pass in today's date. Ranking: a hard rule for experience gaps. Search: one job title, never a list | Years 11 → 2 for a career changer; 2.0 → 4.0 for a current job; one query firing 16 searches → 2 |
+| **Few-shot examples** | The fabrication judge got one plain rule ("flag only what the rewrite *adds*") plus 8 worked examples from unrelated domains | Same 45 claims, still flagged: 40 → 32 |
+| **A stronger model where it matters** | The judge is `gpt-4.1`, stronger than the `gpt-4o-mini` that writes the CV | 32 → **7** of 45 still flagged, all 7 real |
+| **The right tool for each check** | Text similarity kept only for skills (exact matching works); all sentences go to the judge | Flag rate 0.235 → **0.104** |
+| **Asking the user instead of guessing** | Locations and remote preference moved out of the CV extraction into the form | Extraction stopped inventing roles; `primary_roles` 0.62 → 0.77 |
+| **Deterministic guards behind prompts** | Code cuts any list of roles to one title; a reformulation round searches exactly the chosen title instead of asking an LLM again | A broader search now really searches the broader title |
+| **Fixing the eval itself** | The ranking replay forgot the user's target role; stored and replayed it | 0.870 → 0.891 without touching the model |
+| **Measured, then dropped** | `gpt-4.1-mini` as judge, `gpt-5-mini` for extraction, Opik's automatic prompt optimiser, a "description is cut off" rule, a reasoning field | Each was worse or no better; see chapter 7 |
+
+The rest of this section is the full story behind each row.
 
 ## 🔬 The eval story
 
@@ -63,7 +196,7 @@ This is the part I'd want someone to read. Joblyst worked end to end long before
 | **Ranking** — are "matched skills" real? | same 46, exact lookup | 0.978 | **0.978** |
 | **Profile extraction** — field accuracy | 5 hand-verified CVs, deterministic | 0.569 | **0.738** ¹ |
 | **Fabrication** — share of generated claims flagged | 14-case tailoring batch | 0.388 | **0.104** ² |
-| **Routing + query guards** | unit tests, no LLM | — | **28 passing**, 0.2s |
+| **Routing, query guards, API, corpus** | unit tests, no LLM, no API keys | — | **36 passing**, under 1s |
 
 <sub>¹ Partly arithmetic — two fields that a CV cannot answer were moved out of extraction entirely. The real gain is in one field; see chapter 4.<br>² Read by hand, about 21 of the 38 flags are real, so the true rate is about <b>5.8%</b>. Most of the rest come from the judge being shown the wrong CV lines; see chapter 6.</sub>
 
@@ -314,7 +447,9 @@ One honest note on the metric itself: `gpt-5-mini` lost points on `skills` partl
 - `years_experience` doesn't add up multiple roles (4 instead of 5). Fix: extract date ranges, compute in code.
 - The career-changer label — `None` or `2` years of data experience — is a judgment call the extractor can't settle.
 - `primary_roles` has a contradiction I introduced by accident: "extract only what the CV states" vs "include the natural next step".
-- The search step can still repeat the same query twice, and the LLM budget guard counts one call where it authorises several searches.
+- The broadening step only sees the *last* title it tried, so a third search round can go back to the first title and add no jobs. Fix in progress: a `searched_queries` list in the graph state.
+- Company research (Tavily) is fetched for every tailored CV but never reaches the tailor prompt, which has no slot for it. Fix: add `{{research}}` to the prompt in Opik, then re-measure.
+- The LLM budget guard counts one call where it authorises several searches.
 - For uncited prose (summary, headline, cover letter) `difflib` picks the 3 CV lines the judge sees, and often picks wrong — about 17 of 38 flags. Fix, tested but not wired in: pick them with `text-embedding-3-small` instead (proof line moved from #16–#24 to #1 in every case tested).
 - The judge's retry covers *every* error, including permanent ones like a bad request; it should retry only on rate limits, timeouts and connection errors.
 - Fabrication-judge **recall** is unmeasured: I've confirmed it stops false alarms, not that it catches everything.
@@ -326,7 +461,7 @@ One honest note on the metric itself: `gpt-5-mini` lost points on `skills` partl
 ## ▶️ Running the evals
 
 ```bash
-# fast, offline, no API key
+# fast, offline, no API keys needed
 uv run pytest tests/ -q
 
 # replay ranking on the 46 labelled items (needs OPIK_API_KEY)
@@ -347,26 +482,18 @@ Every script prints its plan and estimated cost and stops unless you pass `--yes
 | Layer | Choice |
 |---|---|
 | Agent orchestration | **LangGraph** + **LangChain** |
+| Backend | **FastAPI**, with Server-Sent Events for live search progress |
+| Web app | **Next.js** 16 + React 19 + TypeScript |
+| Database | **Postgres** (Supabase) via psycopg 3: sessions + LangGraph checkpoints |
 | LLMs | OpenAI — `gpt-4o-mini` for extraction, ranking and tailoring; `gpt-4.1-nano` for search queries; **`gpt-4.1` as the fabrication judge** |
-| Observability & evals | **Opik** — traces, spans, cost, datasets, experiments, prompt library |
+| Observability, evals & prompts | **Opik** — traces, spans, cost, datasets, experiments; the prompt library is where the app's prompts live |
 | Data validation | **Pydantic v2** |
 | Job sources | JSearch, Adzuna, Remotive, Himalayas, Jooble, plus an offline snapshot |
 | Company research | Tavily |
-| PDF parsing | pypdf |
+| PDF | pypdf (reading CVs), fpdf2 (writing the tailored CV) |
 | Testing | pytest |
 | Config | pydantic-settings (`.env`-driven) |
 | Package/runtime | Python 3.12, [`uv`](https://docs.astral.sh/uv/) |
-
-## 🚀 Getting started
-
-```bash
-uv sync --all-groups
-cp .env.example .env          # add OPENAI_API_KEY at minimum
-uv run python scripts/check_setup.py
-uv run streamlit run app.py
-```
-
-Everything else — job-source keys, Opik, the judge model, ranking knobs — is documented in `.env.example`. The app runs with just an OpenAI key; every other integration degrades gracefully when its key is absent.
 
 ## 🗺️ Status
 
@@ -379,9 +506,14 @@ Everything else — job-source keys, Opik, the judge model, ranking knobs — is
 | Fabrication validator | ✅ done, evaluated |
 | External job scoring (paste a posting) | ✅ done |
 | Target-role override | ✅ done |
+| FastAPI backend with live search progress | ✅ done |
+| Next.js web app | ✅ done, tested end to end in a browser |
+| Sessions + checkpoints in Postgres (Supabase) | ✅ done, survives a restart |
+| Prompts managed in Opik's prompt library | ✅ done |
 | Streamlit testbed UI | ✅ done |
 | Eval suite — ranking, extraction, fabrication, routing tests | ✅ done |
 | Fabrication-judge recall, LLM-judge calibration | 🔄 next |
+| Public deployment (backend + web app) | 📋 next |
 | CI gate that fails a change when a score drops | 📋 planned |
 
 Built by following [jamwithai/observable-job-agent](https://github.com/jamwithai/observable-job-agent) to learn production LangGraph patterns firsthand — then diverging where the evidence pointed somewhere better: extra job sources, user-supplied preferences, a hand-labelled extraction eval, and a fabrication judge rebuilt after measuring how often the original one was wrong.
