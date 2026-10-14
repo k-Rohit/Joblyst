@@ -37,8 +37,9 @@ def render_cv_pdf(cv: CVContent, name: str | None) -> bytes:
     if name:
         pdf.set_font("Helvetica", "B", 16)
         pdf.cell(width, 9, _plain(name), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10.5)
-    line(cv.headline)
+    pdf.set_font("Helvetica", "", 9.5)
+    # No headline line: the model often writes the name into it ("Kumar Rohit -
+    # Mid-Level AI Engineer"), which repeats the line above.
 
     heading("SUMMARY")
     line(cv.summary)

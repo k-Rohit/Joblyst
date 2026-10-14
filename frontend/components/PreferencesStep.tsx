@@ -86,7 +86,7 @@ export default function PreferencesStep({
               <dd>{LEVELS[profile.seniority]}</dd>
             </div>
             <div>
-              <dt className="label">Paid experience</dt>
+              <dt className="label">Experience</dt>
               <dd>{years == null ? "Not clear" : `${years} year${years === 1 ? "" : "s"}`}</dd>
             </div>
           </dl>
