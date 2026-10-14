@@ -166,7 +166,7 @@ Every number was measured on fixed, hand-checked data. The baseline is the first
 | Ranking: fit score on the right side of 60 (46 hand-labelled jobs) | 0.870 | **0.891** |
 | Ranking: "matched skills" really in the CV | 0.978 | **0.978** |
 | Profile extraction: field accuracy (5 hand-checked CVs) | 0.569 | **0.738** |
-| Fabrication: share of generated claims flagged (14 tailored CVs) | 0.388 | **0.104** (about **5.8%** real, read by hand) |
+| Fabrication: share of generated claims flagged (14 tailored CVs) | 0.388 | **0.104** |
 
 **What changed, by type of optimisation**
 
@@ -308,115 +308,54 @@ No job is titled that. The LLM had returned a 7-word list; the guard cut it to 6
 
 16 terms. The search step obediently issued **one search per term**, including `SQL` and `Excel`, which are skills, not job titles. That case made ~32 searches and found the *fewest* jobs of any — because "broader" had been implemented as "more terms", and a list matches no posting. Given the same one-title rule as the search step: **16 tool calls → 2**.
 
+**The broader search never searched the broader title.** No eval caught this; the web app did. Once the search streamed its progress live, every run showed the same contradiction:
+
+```
+Not enough strong matches, trying 'data architect'
+Searched for 'data engineer': 20 jobs so far      <- the old title, searched again
+...
+Searched for 'data engineer': 20 jobs so far      <- third round: 0 new jobs
+```
+
+The broadening step did its job and set `search_query = "data architect"` in the graph state. But the search step never searched that field. It passed it to its own LLM as a *suggestion* ("use this broader query"), searched whatever that LLM wrote, and saved the LLM's choice back to `search_query`, overwriting the broader title. Tested on its own with the round-2 inputs, the search LLM ignored the suggestion **5 times out of 5** and wrote "Data Engineer", exactly what it writes with no suggestion at all. So every extra round cost an LLM call, the job-board calls and a ranking pass, mostly to repeat the first search.
+
+The fix takes the LLM out of that step: a broadening round now searches **exactly** the title the broadening step chose. On the same search, round 2 really searched **'Data Architect'** and added 10 new jobs, with one LLM call fewer per round. A unit test pins it: given a broadened title, the search step must use it and must not call an LLM.
+
+**It also showed the next problem: already-searched titles come back.** In that same run, round 3 went *back* to 'Data Engineer', the first title, and added nothing. The broadening step is only told the *last* title it tried, so it can't know 'Data Engineer' was already searched, and the obvious "broader" neighbour of Data Architect is Data Engineer. The fix is under way: the graph state now keeps a `searched_queries` list (every title searched in this run, reset for each new search), and the next step is to show it to the broadening prompt as "don't repeat these", and to stop searching instead of repeating one if the model suggests it anyway.
+
 ### Chapter 6 — The fabrication check
 
-This is the feature the project is named for — and the measurement that surprised me most.
+Every tailored CV is checked before you see it: does each line say only what your real CV supports?
 
-**First batch: 39% of generated claims flagged.** 144 flags across 371 claims, every tailored run flagged. A tailoring model that invents 4 lines in 10 would be unusable. Reading the flags, almost none were inventions. Three separate causes:
+**What was happening.** The first batch flagged **39%** of all generated claims (144 of 371), so every tailored CV looked untrustworthy. Reading the flags by hand, almost none were inventions. The checker was wrong, not the writer, for three reasons:
 
-**1. The cheap check can't tell direction.** It scores text similarity and flags anything below 0.65. Honest shortening scores low:
+1. **The cheap similarity check punished honest shortening.** It flags any line too different in wording from its source, so a faithful summary scored low:
+   ```
+   real CV : Migrated a critical Airflow DAG delivering company/account data to
+             Salesforce CRM into a Databricks workflow, reducing latency by 40%.
+   rewrite : Migrated critical workflows from Airflow to Databricks, reducing
+             data processing latency by 40%.          -> similarity 0.55, FLAGGED
+   ```
+2. **The LLM judge flagged what was left out**, which its prompt said was fine, and once even called a removed word an *addition*.
+3. **The CV parser split sentences in half** (`"...at a p99 latency of"` / `"45ms."`), so the judge was correctly told "45ms" wasn't in the line it was shown.
 
-```
-real CV : Migrated a critical Airflow DAG delivering company/account data to
-          Salesforce CRM into a Databricks workflow, reducing latency by 40%.
-rewrite : Migrated critical workflows from Airflow to Databricks, reducing
-          data processing latency by 40%.          -> similarity 0.55, FLAGGED
-```
+**How it was fixed.**
+- The similarity check now only checks **skills**, where exact matching is the right tool. Every sentence goes to the LLM judge.
+- The judge got one plain rule, *flag only what the rewrite adds; leaving things out is fine*, plus 8 worked examples from unrelated domains, so a re-run can't pass by memorising the real claims.
+- The judge became **`gpt-4.1`**, stronger than the `gpt-4o-mini` that writes the CV: a judge no better than the writer shares its blind spots.
+- The parser now treats a line starting with a digit as a continuation.
 
-Nothing invented. All 99 flags from this stage were on prose, and every one I read was a summary.
+**The numbers** (same 14-CV tailoring batch each time):
 
-**2. The LLM judge flagged omissions — which its own prompt forbade.** At least half its flags said *"the rewrite omits…"*, against three separate sentences telling it omission is fine. One was worse: when a rewrite dropped the word *"three"*, it reported that the rewrite had **added** a detail. An earlier entry in my own engineering log recorded this exact problem as *fixed*. It wasn't — I'd changed the wording and never re-measured. **A prompt fix without a measurement is a hope.**
-
-**3. The CV parser split a sentence in half** — `"...at a p99 latency of"` / `"45ms."` — because a line starting with a digit wasn't treated as a continuation. So the judge was correctly told "45ms" wasn't in the source it was shown.
-
-**The fix — for two of the three.** Repaired the parser; gave the judge one simple rule — *flag only what a rewrite says that the CV doesn't; leaving things out is always fine* — with eight worked examples from unrelated domains (so a re-run can't pass by memorising the real claims); and made the judge a **stronger model than the one writing the CV**, since a judge no better than the writer shares its blind spots.
-
-**Measured on the same 45 claims, only the judge changing:**
-
-| judge | still flagged |
-|---|---|
-| original prompt, gpt-4o-mini | 40 / 45 |
-| new prompt, gpt-4o-mini | 32 / 45 |
-| **new prompt, gpt-4.1** | **7 / 45** |
-
-All 7 survivors are real, and each quotes the invented phrase:
-
-```
-"fostering a strong understanding of data analysis concepts"   — invented outcome
-"improving educational outcomes and student performance"       — invented outcome
-"through innovative teaching methods and data analysis"        — invented cause
-"Managed and optimized ... enhancing data accessibility"       — inflated role
-```
-
-**The pattern is the useful part:** every real fabrication is vague, flattering padding on the career-changer's teaching bullets. None invented a tool or changed a number. That tells me exactly where the tailoring prompt is weak.
-
-**Then the full batch, re-run — and it only half-worked.**
-
-| | before | after |
-|---|---|---|
-| LLM-judge flags | 45 | **16** |
-| similarity-stage flags | 99 | 74 |
-| fabrication rate | 0.388 | **0.235** |
-
-The judge was fixed: of its 16 flags, **14 are real** (all the same kind of qualitative padding — *"providing insights that drove strategic decisions"*, *"demonstrating strong analytical skills"*), and the other 2 come from one sentence the parser still splits. But the rate only fell to 23.5%, because the re-judge test had only ever measured stage 2. **The cheap similarity stage — cause 1 — I hadn't touched**, and it now produces 74 of the 90 flags, still flagging honest summaries:
-
-```
-real CV : Built a churn prediction model in scikit-learn that improved retention
-          campaign targeting by 12% and is now retrained monthly on 1.2M records.
-rewrite : Developed a churn prediction model in scikit-learn, enhancing retention
-          campaign targeting by 12%.                   -> similarity 0.645, FLAGGED
-```
-
-So the honest number was about 14 real fabrications in 383 claims — 3.7% — with the similarity stage drowning it in noise.
-
-**So I took the similarity stage off prose entirely.** It now checks only skills, where exact matching is the right tool. Every bullet, summary, headline and cover-letter sentence goes straight to the judge:
-
-| batch | flags | rate | check time | judge cost, 14 CVs |
+| | Claims flagged | Rate | Check time per CV | Judge cost, 14 CVs |
 |---|---|---|---|---|
-| original | 144 / 371 | 0.388 | 1.7s | — |
-| new judge, old similarity gate | 90 / 383 | 0.235 | 4.1s | $0.245 |
-| **similarity gate on skills only** | **38 / 364** | **0.104** | **5.8s** | **$0.41** |
+| Baseline | 144 / 371 | 0.388 | 1.7 s | — |
+| New judge prompt + `gpt-4.1` | 90 / 383 | 0.235 | 4.1 s | $0.25 |
+| **+ similarity check on skills only** | **38 / 364** | **0.104** | **5.8 s** | **$0.41** |
 
-Reading all 38: about **21 are real** — the same flattering padding, two invented facts about the hiring company (*"Time Hack Consulting's innovative approach in the fintech space"*), and one subtle number distortion that is exactly what the judge exists for:
+Reading all 38 by hand, about **21 are real**, a true rate of about **5.8%**. They're mostly vague, flattering padding ("demonstrating strong analytical skills"), two invented facts about the hiring company, and one number distortion, exactly what the check exists for: the CV said 19 of 23 flagged students were correct; the letter said 23. On the judge alone, the same 45 claims went from 40 still flagged to **7, all real**. In 218 judge calls there were zero rate-limit errors.
 
-```
-real CV : Identified 23 at-risk students in its first term, 19 of whom were correctly flagged.
-letter  : ...successfully flagging 23 students...          <- 19 were correct, not 23
-```
-
-**The other ~17 revealed a new weakness I'd introduced.** Bullets cite their exact source line, but the summary, headline and cover letter don't — so the judge is shown the 3 CV lines that *look* most similar, and that pick is often wrong:
-
-```
-letter   : "With over 11 years of experience in data engineering..."
-judge    : "None of the sources mention the number of years."
-real CV  : "Lead data engineer with 11 years of experience..."  <- not among the 3 it was shown
-```
-
-The judge is right about what it was shown; it was shown the wrong lines. The line picker was `difflib`, which compares characters and divides by length — so a long CV line that says almost exactly the same thing loses to short, loosely related ones.
-
-**Tested a better picker: embeddings** (`text-embedding-3-small`), which match by meaning. On the three wrongly flagged sentences, the line that proves each one:
-
-| sentence | `difflib` rank | embedding rank |
-|---|---|---|
-| "With over 11 years of experience in data engineering..." | #20 | **#1** |
-| "Junior Data Engineer specializing in GenAI and Agentic AI" | #16 of 50 | **#1** |
-| "With 2 years of experience as a data scientist..." | #24 | **#1** |
-
-The second one is the clearest: the headline is nearly a copy of a line in my CV, and `difflib` still ranked that line 16th. **Retrieval quality caps judge quality** — every remaining false-flag pattern here is a retrieval failure, not a judging one. Not wired in yet; it's the next change.
-
-A mistake of my own worth noting: when counting how many judge flags were "about omission", my keyword search matched *"the source does not mention"* — which the judge uses to explain an **added** phrase. Reading them, none were omissions. Counting by keyword is not the same as reading.
-
-**The trade-off, accepted deliberately.** The stronger judge is slower and costs more. Measured over the real runs, the check went from a median of **1.7s to 5.8s** per CV — far less than the 10–20s I'd estimated — and the judge now costs about 3 cents per CV. In the batch before the last change, the cost split looked like this:
-
-| | model | cost (14 cases) | share |
-|---|---|---|---|
-| fabrication judge | gpt-4.1 | $0.245 | 85% |
-| writing the CV | gpt-4o-mini | $0.012 | 4% |
-| search + ranking | gpt-4o-mini, gpt-4.1-nano | $0.033 | 11% |
-
-Checking a tailored CV costs far more than writing it — but still only cents. Worth it: tailoring is a one-off action a user already waits ~14 seconds for, and a checker that flags 39% of lines teaches people to ignore it — which hides the few that are real.
-
-**Rate limits, measured rather than assumed.** This account allows gpt-4.1 30,000 tokens a minute, and each judge call is about 640 tokens. Judge calls run 3 at a time with retry and backoff. One CV turned out to need only ~16 judge calls (~10k tokens) — skills and greetings never reach the judge — and a case spends most of its time searching and writing, so any 60-second window holds roughly one CV's judging. Across 218 judge calls in the last batch: **zero rate-limit errors**, so the backoff never fired. It's insurance for two users tailoring at the same moment, since the 30k is shared across the account.
+**What's left.** Most of the ~17 false flags have one cause: the summary and cover letter don't cite a source line, so the judge is shown the 3 CV lines that *look* most similar, and `difflib` often picks the wrong ones. Embeddings ranked the proving line **#1** in all three cases tested, where `difflib` had it at #16–#24. That's tested but not wired in yet. The full story, with every intermediate step, is in [`docs/engineering_log.md`](docs/engineering_log.md).
 
 ### Chapter 7 — What I tried and didn't keep
 
@@ -437,26 +376,9 @@ One honest note on the metric itself: `gpt-5-mini` lost points on `skills` partl
 - **Read the raw outputs before trusting a number.** The 39% fabrication rate was real arithmetic about the wrong thing.
 - **An LLM never refuses for lack of context** — it invents. Required inputs must fail loudly.
 - **A bug often shows up somewhere other than where it lives.** The worst ranking error came from extraction; the worst search fan-out came from the reformulation node.
-- **Keep arithmetic out of the model.** Both date bugs were arithmetic.
+- **Keep arithmetic out of the model as much as possible especially if using some older models.** Both date bugs were arithmetic.
 - **Ask the user for what the document can't contain.**
 - **A prompt is a request, not a guarantee.** Every prompt rule that matters has a deterministic guard behind it.
-- **Sometimes keep a change the metric dislikes** — but write down why.
-
-### Still open
-
-- `years_experience` doesn't add up multiple roles (4 instead of 5). Fix: extract date ranges, compute in code.
-- The career-changer label — `None` or `2` years of data experience — is a judgment call the extractor can't settle.
-- `primary_roles` has a contradiction I introduced by accident: "extract only what the CV states" vs "include the natural next step".
-- The broadening step only sees the *last* title it tried, so a third search round can go back to the first title and add no jobs. Fix in progress: a `searched_queries` list in the graph state.
-- Company research (Tavily) is fetched for every tailored CV but never reaches the tailor prompt, which has no slot for it. Fix: add `{{research}}` to the prompt in Opik, then re-measure.
-- The LLM budget guard counts one call where it authorises several searches.
-- For uncited prose (summary, headline, cover letter) `difflib` picks the 3 CV lines the judge sees, and often picks wrong — about 17 of 38 flags. Fix, tested but not wired in: pick them with `text-embedding-3-small` instead (proof line moved from #16–#24 to #1 in every case tested).
-- The judge's retry covers *every* error, including permanent ones like a bad request; it should retry only on rate limits, timeouts and connection errors.
-- Fabrication-judge **recall** is unmeasured: I've confirmed it stops false alarms, not that it catches everything.
-- One sentence in my real CV still splits across two corpus items (a wrapped line starting with a capital), and the source PDF contains leftover template text (`...redesign.ement bullet point here.`).
-- Adzuna's 500-character descriptions are a hard limit of free data.
-
----
 
 ## ▶️ Running the evals
 
@@ -495,26 +417,6 @@ Every script prints its plan and estimated cost and stops unless you pass `--yes
 | Config | pydantic-settings (`.env`-driven) |
 | Package/runtime | Python 3.12, [`uv`](https://docs.astral.sh/uv/) |
 
-## 🗺️ Status
-
-| Piece | State |
-|---|---|
-| CV → profile extraction | ✅ done, evaluated |
-| Multi-source concurrent search | ✅ done |
-| Ranking + reformulation loop | ✅ done, evaluated |
-| Corpus-grounded tailoring | ✅ done |
-| Fabrication validator | ✅ done, evaluated |
-| External job scoring (paste a posting) | ✅ done |
-| Target-role override | ✅ done |
-| FastAPI backend with live search progress | ✅ done |
-| Next.js web app | ✅ done, tested end to end in a browser |
-| Sessions + checkpoints in Postgres (Supabase) | ✅ done, survives a restart |
-| Prompts managed in Opik's prompt library | ✅ done |
-| Streamlit testbed UI | ✅ done |
-| Eval suite — ranking, extraction, fabrication, routing tests | ✅ done |
-| Fabrication-judge recall, LLM-judge calibration | 🔄 next |
-| Public deployment (backend + web app) | 📋 next |
-| CI gate that fails a change when a score drops | 📋 planned |
 
 Built by following [jamwithai/observable-job-agent](https://github.com/jamwithai/observable-job-agent) to learn production LangGraph patterns firsthand — then diverging where the evidence pointed somewhere better: extra job sources, user-supplied preferences, a hand-labelled extraction eval, and a fabrication judge rebuilt after measuring how often the original one was wrong.
 
