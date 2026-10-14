@@ -20,8 +20,8 @@ function section(where: string): string {
 
 function cvAsText(cv: CVContent, name: string | null): string {
   const out: string[] = [];
-  if (name) out.push(name);
-  out.push(cv.headline, "", "SUMMARY", cv.summary);
+  if (name) out.push(name, "");
+  out.push("SUMMARY", cv.summary);
   if (cv.experience.length) {
     out.push("", "EXPERIENCE");
     for (const e of cv.experience) {
@@ -96,13 +96,13 @@ export default function TailoredStep({
   const flagFor = (b: TailoredBullet) =>
     report.flagged.find((f) => f.where === `cv_bullet:${b.corpus_ref}` || f.text === b.text);
   const skillFlagged = (s: string) => report.flagged.some((f) => f.where === `skill:${s}`);
-  const summaryFlags = report.flagged.filter((f) => f.where.startsWith("summary") || f.where.startsWith("headline"));
+  const summaryFlags = report.flagged.filter((f) => f.where.startsWith("summary"));
   const letterFlags = report.flagged.filter((f) => f.where.startsWith("cover_letter"));
   const bulletFlags = report.flagged.filter((f) => f.where.startsWith("cv_bullet"));
   const skillFlags = report.flagged.filter((f) => f.where.startsWith("skill"));
   // The report has one total, not per-section totals, so each row shows that section's flags.
   const sections = [
-    { label: "Summary and headline", flagged: summaryFlags.length },
+    { label: "Summary", flagged: summaryFlags.length },
     { label: "Experience and project lines", flagged: bulletFlags.length },
     { label: "Skills", flagged: skillFlags.length },
     { label: "Cover letter", flagged: letterFlags.length },
@@ -160,7 +160,6 @@ export default function TailoredStep({
             <>
               <section className="card" aria-labelledby="summary-h" style={{ gap: 12 }}>
                 <h2 id="summary-h" className="label">Summary</h2>
-                <p style={{ margin: 0, fontWeight: 600 }}>{cv.headline}</p>
                 <p className="prose">{cv.summary}</p>
                 {summaryFlags.map((f, i) => (
                   <p key={i} className="flagged small" style={{ margin: 0, color: "var(--warn-ink)" }}>

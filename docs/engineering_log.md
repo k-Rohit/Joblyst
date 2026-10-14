@@ -741,7 +741,7 @@ Verified against the real database in a scratch run: opened in 0.9 s, a second `
 
 **Result.** Checked with a sample pack containing `“ ” ’ – …` and an emoji: unknown thread 404, not tailored 409, tailored **200** with a 1.5 KB one-page PDF. All sections render, a long bullet wraps, the name/headline/sections read back correctly with `pypdf`, and the emoji came out as `?`. 35 tests pass.
 
-2026-10-14: the headline line was removed from the PDF. The model often writes the candidate's name into it ("Kumar Rohit - Mid-Level AI Engineer"), so the PDF printed the name twice, once as the title and once in that line. The PDF now goes from the name straight to SUMMARY.
+2026-10-14: the headline line was removed from the PDF. The model often writes the candidate's name into it ("Kumar Rohit - Mid-Level AI Engineer"), so the PDF printed the name twice, once as the title and once in that line. The PDF now goes from the name straight to SUMMARY. Same on the website: the tailored-CV screen and the "Copy CV text" output no longer show it, so all three match. A headline flag, if the judge raises one, still appears in the fabrication panel's list under "Headline".
 
 Limits: scripts outside Latin-1 (Devanagari, Chinese) print as `?`; fixing that means bundling a Unicode TTF font. The PDF has no contact line, because `Profile` doesn't store email or phone.
 
