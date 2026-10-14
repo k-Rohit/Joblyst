@@ -52,13 +52,6 @@ And it's **measured**. Every part of the pipeline that an LLM touches has an eva
   <img src="docs/images/architecture-light.png" alt="Joblyst architecture: a Next.js web app calls a stateless FastAPI backend, which runs a LangGraph agent. State lives in Postgres (Supabase) and Opik; the agent calls OpenAI, five job boards and Tavily." width="100%">
 </picture>
 
-Four parts, each with one job:
-
-- **Next.js web app:** the four screens (upload, preferences, live search, tailored CV). It holds no state except the `thread_id` it got back from the upload.
-- **FastAPI backend:** stateless. Every request carries the `thread_id`, and everything it needs is loaded from Postgres, so a restart or a second server process loses nothing.
-- **LangGraph agent:** the search, ranking and tailoring logic, as a graph of nodes that share one typed state.
-- **Postgres** stores two things: the **session** (CV text and extracted profile, written at upload and kept 7 days) and the agent's **checkpoints** (its state after every step, so tailoring can read the ranked jobs a search produced). **Opik** holds the prompts, every trace, and the eval datasets and experiments.
-
 ### What happens on each request
 
 | User step | Endpoint | What runs | What's stored |
