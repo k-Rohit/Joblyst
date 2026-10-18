@@ -824,6 +824,16 @@ Seen in that run, not fixed: after "Not enough strong matches, trying 'data arch
 
 **Result.** Checked on a real call: Tavily returned 1,504 characters about Fragma Data Systems, and that text now appears under "Company research:" in the rendered prompt. 36 tests pass. **Not measured:** the effect on the fabrication rate. The expectation is fewer invented company facts in cover letters; confirming it needs a tailoring batch run (`scripts/run_tailor_batch.py --yes`, about $0.40), which was skipped for now.
 
+## 2026-10-18 · Packaging the backend in Docker
+
+**What.** A `Dockerfile` (python 3.12-slim, uv 0.10.2 pinned, dependencies installed before the code is copied so code-only rebuilds reuse the cached layer, runs as a non-root `app` user, binds `0.0.0.0:$PORT` with proxy headers so rate limits see the real client IP) and a `.dockerignore` that keeps out `.env` and `data/fixture_cvs/` (the author's real CV).
+
+**Two problems the container exposed.**
+1. *A production import was a dev dependency.* The first container crashed on `ModuleNotFoundError: No module named 'fpdf'`. `fpdf2` had been added to the `dev` group for the fixture-CV script, and `cv_pdf.py` later started using it in production; it worked locally only because `uv sync --all-groups` installs dev dependencies. Moved to the main dependencies. A scan of every third-party import in `src/` found three more that were installed only by accident, as dependencies of other packages: `httpx` (job boards), `openai` (the error handler) and `langchain-core`. Declared directly so a dependency change upstream can't break the build.
+2. *The image was 1.64 GB.* 675 MB was uv's download cache left inside the image, and about 250 MB was Streamlit with pandas, pyarrow and numpy, used only by the old `app.py` test UI. Fix: `RUN --mount=type=cache,target=/root/.cache/uv` keeps the cache outside the image (and still speeds up rebuilds), and Streamlit moved to a `ui` dependency group that the image skips (`--no-group ui`); `uv sync --all-groups` still installs it locally.
+
+**Result.** Image **1.64 GB → 609 MB**. Inside the container: `/health` returns 200, startup completes (so all 8 prompts loaded from Opik and Supabase connected), the process runs as `app`, and neither `.env` nor the fixture CVs are in the image. 36 tests pass.
+
 ## Known limitations (not yet fixed)
 
 - **Non-standard Title Case headings.** `Certifications` written in Title Case

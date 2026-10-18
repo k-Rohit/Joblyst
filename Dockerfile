@@ -5,11 +5,14 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# The cache mount keeps uv's download cache outside the image.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-group ui --no-install-project
 
 COPY src ./src
 COPY README.md ./
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-group ui
 
 
 COPY data/cached_jobs.json ./data/cached_jobs.json

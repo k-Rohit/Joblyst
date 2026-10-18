@@ -13,7 +13,6 @@ dependencies = [
     "pydantic>=2.11",
     "pydantic-settings>=2.6",
     "pypdf>=6.17.0",
-    "streamlit>=1.38",
     "fastapi>=0.142.2",
     "uvicorn[standard]>=0.52.4",
     "python-multipart>=0.0.32",
@@ -30,6 +29,9 @@ dependencies = [
 dev = [
     "pytest>=8",
     "ruff>=0.8",
+]
+ui = [
+    "streamlit>=1.66.0",
 ]
 
 [build-system]
