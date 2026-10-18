@@ -17,7 +17,7 @@
 </p>
 
 </div>
-<img src="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yml/badge.svg" alt="CI">
+<a href="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yaml"><img src="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
 
 ---
 
