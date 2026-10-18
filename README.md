@@ -9,6 +9,7 @@
 ### 🧭 An AI agent that finds jobs that actually fit — and tailors your CV without lying about it
 
 <p>
+  <a href="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yaml"><img src="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/LangGraph-1.1+-1C3C3C?logo=langchain&logoColor=white" alt="LangGraph">
   <img src="https://img.shields.io/badge/Opik-observability-6f42c1" alt="Opik">
@@ -17,7 +18,6 @@
 </p>
 
 </div>
-<a href="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yaml"><img src="https://github.com/k-Rohit/Joblyst/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
 
 ---
 
